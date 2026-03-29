@@ -35,3 +35,9 @@ func (c *Cache) Set(key string, data json.RawMessage, ttl time.Duration) {
 	defer c.mu.Unlock()
 	c.entries[key] = entry{data: data, expiresAt: time.Now().Add(ttl)}
 }
+
+func (c *Cache) Delete(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.entries, key)
+}

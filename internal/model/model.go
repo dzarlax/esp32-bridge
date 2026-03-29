@@ -31,3 +31,10 @@ type SensorItem struct {
 	Value string `json:"v"`
 	Unit  string `json:"u"`
 }
+
+type LightItem struct {
+	ID         string `json:"id"`  // entity_id
+	Name       string `json:"n"`
+	On         bool   `json:"on"`
+	Brightness int    `json:"br,omitempty"` // 0-255
+}

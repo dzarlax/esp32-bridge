@@ -26,6 +26,7 @@ type Config struct {
 	HABaseURL  string
 	HAToken    string
 	HASensors  []string
+	HALights   []string
 	HACacheTTL time.Duration
 
 	FetchTimeout time.Duration
@@ -51,6 +52,7 @@ func Load() *Config {
 		HABaseURL:  envStr("HA_BASE_URL", ""),
 		HAToken:    envStr("HA_TOKEN", ""),
 		HASensors:  envList("HA_SENSORS"),
+		HALights:   envList("HA_LIGHTS"),
 		HACacheTTL: envDuration("HA_CACHE_TTL", 120),
 
 		FetchTimeout: envDuration("FETCH_TIMEOUT", 5),

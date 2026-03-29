@@ -40,7 +40,11 @@ func main() {
 	}
 	if cfg.HABaseURL != "" && len(cfg.HASensors) > 0 {
 		fetchers = append(fetchers, fetcher.NewHA(cfg.HABaseURL, cfg.HAToken, cfg.HASensors, client, cfg.HACacheTTL))
-		log.Printf("HA fetcher: %s (%d sensors)", cfg.HABaseURL, len(cfg.HASensors))
+		log.Printf("HA sensors: %s (%d sensors)", cfg.HABaseURL, len(cfg.HASensors))
+	}
+	if cfg.HABaseURL != "" && len(cfg.HALights) > 0 {
+		fetchers = append(fetchers, fetcher.NewLights(cfg.HABaseURL, cfg.HAToken, cfg.HALights, client, cfg.HACacheTTL))
+		log.Printf("HA lights: %s (%d lights)", cfg.HABaseURL, len(cfg.HALights))
 	}
 
 	if len(fetchers) == 0 {
@@ -48,10 +52,11 @@ func main() {
 	}
 
 	orch := fetcher.NewOrchestrator(fetchers, c, cfg.FetchTimeout)
-	h := handler.New(orch, cfg.APIKey)
+	h := handler.New(orch, cfg.APIKey, cfg.HABaseURL, cfg.HAToken, client)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/dashboard", h.Dashboard)
+	mux.HandleFunc("/api/ha/action", h.HAAction)
 	mux.HandleFunc("/health", h.Health)
 
 	log.Printf("esp32-bridge listening on %s (%d fetchers)", cfg.ListenAddr, len(fetchers))

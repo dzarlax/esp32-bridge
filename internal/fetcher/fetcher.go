@@ -69,3 +69,7 @@ func (o *Orchestrator) FetchAll() map[string]json.RawMessage {
 	wg.Wait()
 	return results
 }
+
+func (o *Orchestrator) Invalidate(name string) {
+	o.cache.Delete(name)
+}
