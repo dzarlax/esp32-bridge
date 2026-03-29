@@ -38,10 +38,13 @@ func (f *HealthFetcher) Fetch(ctx context.Context) (json.RawMessage, error) {
 	type readinessEntry struct {
 		Score int `json:"score"`
 	}
+	type readinessResp struct {
+		Points []readinessEntry `json:"points"`
+	}
 
 	var (
 		dash      dashResp
-		readiness []readinessEntry
+		readiness readinessResp
 		dashErr   error
 		readErr   error
 	)
@@ -86,8 +89,8 @@ func (f *HealthFetcher) Fetch(ctx context.Context) (json.RawMessage, error) {
 		}
 	}
 
-	if readErr == nil && len(readiness) > 0 {
-		result.Readiness = readiness[0].Score
+	if readErr == nil && len(readiness.Points) > 0 {
+		result.Readiness = readiness.Points[0].Score
 	}
 
 	return json.Marshal(result)
