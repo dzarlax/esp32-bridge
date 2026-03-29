@@ -1,27 +1,21 @@
 services:
   esp32-bridge:
-    build: .
+    image: ghcr.io/dzarlax/esp32-bridge:latest
     container_name: esp32-bridge
     restart: unless-stopped
-    ports:
-      - "8090:8090"
+    env_file: .env
     environment:
       LISTEN_ADDR: ":8090"
-      HEALTH_BASE_URL: "${HEALTH_BASE_URL}"
-      HEALTH_API_KEY: "${HEALTH_API_KEY}"
-      TODOIST_TOKEN: "${TODOIST_TOKEN}"
-      NEWS_BASE_URL: "${NEWS_BASE_URL}"
-      HA_BASE_URL: "${HA_BASE_URL}"
-      HA_TOKEN: "${HA_TOKEN}"
-      HA_SENSORS: "${HA_SENSORS}"
-    networks:
-      - traefik
     labels:
       - "traefik.enable=true"
+      - "traefik.http.routers.esp32-bridge.entrypoints=https"
       - "traefik.http.routers.esp32-bridge.rule=Host(`esp32-bridge.dzarlax.dev`)"
-      - "traefik.http.routers.esp32-bridge.entrypoints=websecure"
-      - "traefik.http.routers.esp32-bridge.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.esp32-bridge.tls=true"
+      - "traefik.http.routers.esp32-bridge.tls.certresolver=letsEncrypt"
       - "traefik.http.services.esp32-bridge.loadbalancer.server.port=8090"
+      - "traefik.docker.network=traefik"
+    networks:
+      - traefik
 
 networks:
   traefik:
