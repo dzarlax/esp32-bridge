@@ -48,7 +48,7 @@ func main() {
 	}
 
 	orch := fetcher.NewOrchestrator(fetchers, c, cfg.FetchTimeout)
-	h := handler.New(orch)
+	h := handler.New(orch, cfg.APIKey)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/dashboard", h.Dashboard)

@@ -10,16 +10,36 @@ import (
 
 type Handler struct {
 	orch    *fetcher.Orchestrator
+	apiKey  string
 	startAt time.Time
 }
 
-func New(orch *fetcher.Orchestrator) *Handler {
-	return &Handler{orch: orch, startAt: time.Now()}
+func New(orch *fetcher.Orchestrator, apiKey string) *Handler {
+	return &Handler{orch: orch, apiKey: apiKey, startAt: time.Now()}
+}
+
+func (h *Handler) requireAuth(w http.ResponseWriter, r *http.Request) bool {
+	if h.apiKey == "" {
+		return true
+	}
+	key := r.Header.Get("X-API-Key")
+	if key == "" {
+		key = r.URL.Query().Get("key")
+	}
+	if key != h.apiKey {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return false
+	}
+	return true
 }
 
 var sectionKeys = []string{"health", "tasks", "news", "sensors"}
 
 func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAuth(w, r) {
+		return
+	}
+
 	results := h.orch.FetchAll()
 
 	w.Header().Set("Content-Type", "application/json")

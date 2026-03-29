@@ -9,6 +9,7 @@ import (
 
 type Config struct {
 	ListenAddr string
+	APIKey     string
 
 	HealthBaseURL string
 	HealthAPIKey  string
@@ -33,6 +34,7 @@ type Config struct {
 func Load() *Config {
 	return &Config{
 		ListenAddr: envStr("LISTEN_ADDR", ":8090"),
+		APIKey:     envStr("API_KEY", ""),
 
 		HealthBaseURL:  envStr("HEALTH_BASE_URL", ""),
 		HealthAPIKey:   envStr("HEALTH_API_KEY", ""),
