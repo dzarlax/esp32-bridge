@@ -61,8 +61,8 @@ func (f *NewsFetcher) Fetch(ctx context.Context) (json.RawMessage, error) {
 			hoursAgo = int(math.Round(now.Sub(t).Hours()))
 		}
 		items = append(items, model.NewsItem{
-			Title:    a.Title,
-			Category: a.Category,
+			Title:    model.SanitizeForDisplay(a.Title),
+			Category: model.SanitizeForDisplay(a.Category),
 			HoursAgo: hoursAgo,
 		})
 	}

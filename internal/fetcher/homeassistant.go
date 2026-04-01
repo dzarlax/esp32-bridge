@@ -101,8 +101,8 @@ func (f *HAFetcher) fetchSensor(ctx context.Context, entityID string) (model.Sen
 	}
 
 	return model.SensorItem{
-		Name:  state.Attributes.FriendlyName,
+		Name:  model.SanitizeForDisplay(state.Attributes.FriendlyName),
 		Value: state.State,
-		Unit:  state.Attributes.UnitOfMeasurement,
+		Unit:  model.SanitizeForDisplay(state.Attributes.UnitOfMeasurement),
 	}, nil
 }

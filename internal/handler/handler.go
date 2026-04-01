@@ -302,7 +302,7 @@ func (h *Handler) fetchCalendarEvents(r *http.Request, entityID, date, nextDay s
 	var events []model.CalendarEvent
 	for _, e := range rawEvents {
 		ev := model.CalendarEvent{
-			Summary: e.Summary,
+			Summary: model.SanitizeForDisplay(e.Summary),
 			CalIdx:  calIdx,
 		}
 		if e.Start.Date != "" {

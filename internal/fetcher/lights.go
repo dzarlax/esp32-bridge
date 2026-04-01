@@ -108,7 +108,7 @@ func (f *LightsFetcher) fetchLight(ctx context.Context, entityID string) (model.
 
 	return model.LightItem{
 		ID:         entityID,
-		Name:       state.Attributes.FriendlyName,
+		Name:       model.SanitizeForDisplay(state.Attributes.FriendlyName),
 		On:         state.State == "on",
 		Brightness: br,
 	}, nil

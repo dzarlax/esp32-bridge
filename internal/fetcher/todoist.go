@@ -70,7 +70,7 @@ func (f *TodoistFetcher) Fetch(ctx context.Context) (json.RawMessage, error) {
 	for i := 0; i < limit; i++ {
 		t := apiResp.Results[i]
 		items[i] = model.TaskItem{
-			Title:    t.Content,
+			Title:    model.SanitizeForDisplay(t.Content),
 			Priority: t.Priority,
 		}
 		if t.Due != nil {

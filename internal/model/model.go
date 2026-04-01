@@ -1,5 +1,27 @@
 package model
 
+import "strings"
+
+// SanitizeForDisplay replaces characters unsupported by the ESP32 display fonts
+// with '?'. Supported ranges: Basic Latin (0x20-0x7F), Latin-1 Supplement (0xA0-0xFF),
+// Cyrillic (0x400-0x4FF). Everything else (emojis, CJK, extended Latin, etc.) is replaced.
+func SanitizeForDisplay(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if (r >= 0x20 && r <= 0x7F) ||
+			(r >= 0xA0 && r <= 0xFF) ||
+			(r >= 0x400 && r <= 0x4FF) {
+			b.WriteRune(r)
+		} else if r == '\t' || r == '\n' {
+			b.WriteByte(' ')
+		} else {
+			b.WriteByte('?')
+		}
+	}
+	return b.String()
+}
+
 type HealthData struct {
 	Steps     int     `json:"steps"`
 	StepsPrev int     `json:"steps_prev"`
