@@ -38,10 +38,9 @@ type Config struct {
 	TransportStops    []string
 	TransportCacheTTL time.Duration
 
-	OTAFirmwareVersion string
-	OTAFirmwareURL     string
-	OTAGitHubToken     string
-	MigrateBridgeURL   string
+	OTAGitHubRepo    string
+	OTAGitHubToken   string
+	MigrateBridgeURL string
 
 	FetchTimeout time.Duration
 }
@@ -78,10 +77,9 @@ func Load() *Config {
 		TransportStops:    envList("TRANSPORT_STOPS"),
 		TransportCacheTTL: envDuration("TRANSPORT_CACHE_TTL", 30),
 
-		OTAFirmwareVersion: envStr("OTA_FIRMWARE_VERSION", ""),
-		OTAFirmwareURL:     envStr("OTA_FIRMWARE_URL", ""),
-		OTAGitHubToken:     envStr("OTA_GITHUB_TOKEN", ""),
-		MigrateBridgeURL:   envStr("OTA_MIGRATE_BRIDGE_URL", ""),
+		OTAGitHubRepo:    envStr("OTA_GITHUB_REPO", ""),
+		OTAGitHubToken:   envStr("OTA_GITHUB_TOKEN", ""),
+		MigrateBridgeURL: envStr("OTA_MIGRATE_BRIDGE_URL", ""),
 
 		FetchTimeout: envDuration("FETCH_TIMEOUT", 5),
 	}

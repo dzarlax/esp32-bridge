@@ -61,10 +61,10 @@ func main() {
 
 	orch := fetcher.NewOrchestrator(fetchers, c, cfg.FetchTimeout)
 	h := handler.New(orch, cfg.APIKey, cfg.HABaseURL, cfg.HAToken, client)
-	h.SetOTA(cfg.OTAFirmwareVersion, cfg.OTAFirmwareURL, cfg.OTAGitHubToken, cfg.MigrateBridgeURL)
+	h.SetOTA(cfg.OTAGitHubRepo, cfg.OTAGitHubToken, cfg.MigrateBridgeURL)
 
-	if cfg.OTAFirmwareVersion != "" {
-		log.Printf("OTA: version %s", cfg.OTAFirmwareVersion)
+	if cfg.OTAGitHubRepo != "" {
+		log.Printf("OTA: repo %s", cfg.OTAGitHubRepo)
 	}
 
 	mux := http.NewServeMux()

@@ -22,21 +22,23 @@ type Handler struct {
 	haToken          string
 	haClient         *http.Client
 	startAt          time.Time
-	otaVersion       string
-	otaFirmwareURL   string
+	otaGitHubRepo    string // "owner/repo"
 	otaGitHubToken   string
 	migrateBridgeURL string
-	fwCache          []byte // cached firmware binary
-	fwCacheURL       string // URL the cache was fetched from
+	// cached latest release info
+	otaLatestVersion string
+	otaLatestURL     string
+	otaCheckedAt     time.Time
+	fwCache          []byte
+	fwCacheVersion   string
 }
 
 func New(orch *fetcher.Orchestrator, apiKey, haBaseURL, haToken string, haClient *http.Client) *Handler {
 	return &Handler{orch: orch, apiKey: apiKey, haBaseURL: haBaseURL, haToken: haToken, haClient: haClient, startAt: time.Now()}
 }
 
-func (h *Handler) SetOTA(version, firmwareURL, ghToken, migrateBridgeURL string) {
-	h.otaVersion = version
-	h.otaFirmwareURL = firmwareURL
+func (h *Handler) SetOTA(ghRepo, ghToken, migrateBridgeURL string) {
+	h.otaGitHubRepo = ghRepo
 	h.otaGitHubToken = ghToken
 	h.migrateBridgeURL = migrateBridgeURL
 }
@@ -345,6 +347,69 @@ func parseTime(dt string) (int, int) {
 	return h, m
 }
 
+// refreshLatestRelease fetches the latest release from GitHub API.
+// Caches result for 5 minutes to avoid rate limiting.
+func (h *Handler) refreshLatestRelease() {
+	if h.otaGitHubRepo == "" {
+		return
+	}
+	if time.Since(h.otaCheckedAt) < 5*time.Minute {
+		return // use cached
+	}
+
+	u := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", h.otaGitHubRepo)
+	req, err := http.NewRequest("GET", u, nil)
+	if err != nil {
+		return
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	if h.otaGitHubToken != "" {
+		req.Header.Set("Authorization", "token "+h.otaGitHubToken)
+	}
+
+	resp, err := h.haClient.Do(req)
+	if err != nil {
+		log.Printf("[ota] GitHub API error: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		log.Printf("[ota] GitHub API HTTP %d", resp.StatusCode)
+		return
+	}
+
+	var release struct {
+		TagName string `json:"tag_name"`
+		Assets  []struct {
+			Name               string `json:"name"`
+			BrowserDownloadURL string `json:"browser_download_url"`
+		} `json:"assets"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		log.Printf("[ota] GitHub API parse error: %v", err)
+		return
+	}
+
+	// Strip "v" prefix from tag: "v1.0.1" → "1.0.1"
+	version := strings.TrimPrefix(release.TagName, "v")
+
+	// Find firmware.bin asset
+	var fwURL string
+	for _, a := range release.Assets {
+		if a.Name == "firmware.bin" {
+			fwURL = a.BrowserDownloadURL
+			break
+		}
+	}
+
+	if version != "" && fwURL != "" {
+		h.otaLatestVersion = version
+		h.otaLatestURL = fwURL
+		h.otaCheckedAt = time.Now()
+		log.Printf("[ota] latest release: %s (%s)", version, fwURL)
+	}
+}
+
 // OTACheck reports whether a firmware update is available.
 // GET /api/ota/check?v=1.0.0
 func (h *Handler) OTACheck(w http.ResponseWriter, r *http.Request) {
@@ -353,18 +418,25 @@ func (h *Handler) OTACheck(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 
-	if h.otaVersion == "" {
+	if h.otaGitHubRepo == "" {
+		fmt.Fprintf(w, `{"update":false}`)
+		return
+	}
+
+	h.refreshLatestRelease()
+
+	if h.otaLatestVersion == "" {
 		fmt.Fprintf(w, `{"update":false}`)
 		return
 	}
 
 	clientVersion := r.URL.Query().Get("v")
-	if clientVersion == h.otaVersion {
+	if clientVersion == h.otaLatestVersion {
 		fmt.Fprintf(w, `{"update":false}`)
 		return
 	}
 
-	fmt.Fprintf(w, `{"update":true,"version":"%s"}`, h.otaVersion)
+	fmt.Fprintf(w, `{"update":true,"version":"%s"}`, h.otaLatestVersion)
 }
 
 // OTAFirmware streams the firmware binary to the ESP32.
@@ -374,26 +446,27 @@ func (h *Handler) OTAFirmware(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.otaFirmwareURL == "" {
-		http.Error(w, `{"error":"OTA not configured"}`, http.StatusServiceUnavailable)
+	h.refreshLatestRelease()
+
+	if h.otaLatestURL == "" {
+		http.Error(w, `{"error":"no release found"}`, http.StatusServiceUnavailable)
 		return
 	}
 
-	// Serve from cache if URL matches
-	if h.fwCache != nil && h.fwCacheURL == h.otaFirmwareURL {
+	// Serve from cache if version matches
+	if h.fwCache != nil && h.fwCacheVersion == h.otaLatestVersion {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(h.fwCache)))
 		w.Write(h.fwCache)
 		return
 	}
 
-	// Download from GitHub
-	req, err := http.NewRequestWithContext(r.Context(), "GET", h.otaFirmwareURL, nil)
+	// Download from GitHub Release
+	req, err := http.NewRequestWithContext(r.Context(), "GET", h.otaLatestURL, nil)
 	if err != nil {
 		http.Error(w, `{"error":"failed to create request"}`, http.StatusInternalServerError)
 		return
 	}
-	req.Header.Set("Accept", "application/octet-stream")
 	if h.otaGitHubToken != "" {
 		req.Header.Set("Authorization", "token "+h.otaGitHubToken)
 	}
@@ -418,9 +491,9 @@ func (h *Handler) OTAFirmware(w http.ResponseWriter, r *http.Request) {
 
 	// Cache for subsequent requests
 	h.fwCache = data
-	h.fwCacheURL = h.otaFirmwareURL
+	h.fwCacheVersion = h.otaLatestVersion
 
-	log.Printf("[ota] cached firmware %d bytes from %s", len(data), h.otaFirmwareURL)
+	log.Printf("[ota] cached firmware v%s (%d bytes)", h.otaLatestVersion, len(data))
 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
