@@ -73,3 +73,21 @@ func (o *Orchestrator) FetchAll() map[string]json.RawMessage {
 func (o *Orchestrator) Invalidate(name string) {
 	o.cache.Delete(name)
 }
+
+// FetchOne fetches a single named fetcher, bypassing cache, and updates it.
+func (o *Orchestrator) FetchOne(name string) json.RawMessage {
+	for _, f := range o.fetchers {
+		if f.Name() == name {
+			ctx, cancel := context.WithTimeout(context.Background(), o.timeout)
+			defer cancel()
+			data, err := f.Fetch(ctx)
+			if err != nil {
+				log.Printf("[%s] FetchOne error: %v", name, err)
+				return nil
+			}
+			o.cache.Set(name, data, f.TTL())
+			return data
+		}
+	}
+	return nil
+}

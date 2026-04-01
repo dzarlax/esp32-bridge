@@ -46,6 +46,14 @@ func main() {
 		fetchers = append(fetchers, fetcher.NewLights(cfg.HABaseURL, cfg.HAToken, cfg.HALights, client, cfg.HACacheTTL))
 		log.Printf("HA lights: %s (%d lights)", cfg.HABaseURL, len(cfg.HALights))
 	}
+	if cfg.WeatherLat != "" {
+		fetchers = append(fetchers, fetcher.NewWeather(cfg.WeatherLat, cfg.WeatherLon, cfg.WeatherTZ, client, cfg.WeatherCacheTTL))
+		log.Printf("Weather fetcher: lat=%s lon=%s", cfg.WeatherLat, cfg.WeatherLon)
+	}
+	if cfg.TransportBaseURL != "" && len(cfg.TransportStops) > 0 {
+		fetchers = append(fetchers, fetcher.NewTransport(cfg.TransportBaseURL, cfg.TransportStops, client, cfg.TransportCacheTTL))
+		log.Printf("Transport fetcher: %s (%d stops)", cfg.TransportBaseURL, len(cfg.TransportStops))
+	}
 
 	if len(fetchers) == 0 {
 		log.Println("Warning: no fetchers configured")
@@ -57,6 +65,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/dashboard", h.Dashboard)
 	mux.HandleFunc("/api/ha/action", h.HAAction)
+	mux.HandleFunc("/api/calendar", h.Calendar)
 	mux.HandleFunc("/health", h.Health)
 
 	log.Printf("esp32-bridge listening on %s (%d fetchers)", cfg.ListenAddr, len(fetchers))

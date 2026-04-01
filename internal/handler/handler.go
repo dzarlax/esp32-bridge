@@ -4,11 +4,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"esp32-bridge/internal/fetcher"
+	"esp32-bridge/internal/model"
 )
 
 type Handler struct {
@@ -39,7 +43,7 @@ func (h *Handler) requireAuth(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-var sectionKeys = []string{"health", "tasks", "news", "sensors", "lights"}
+var sectionKeys = []string{"health", "tasks", "news", "sensors", "lights", "weather", "transport"}
 
 func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAuth(w, r) {
@@ -145,10 +149,182 @@ func (h *Handler) HAAction(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if haResp.StatusCode == 200 {
-		fmt.Fprintf(w, `{"ok":true}`)
+		// Fetch fresh lights state after toggle
+		time.Sleep(200 * time.Millisecond)
+		lights := h.orch.FetchOne("lights")
+		if lights != nil {
+			fmt.Fprintf(w, `{"ok":true,"lights":%s}`, lights)
+		} else {
+			fmt.Fprintf(w, `{"ok":true}`)
+		}
 	} else {
 		respBody, _ := io.ReadAll(haResp.Body)
 		w.WriteHeader(haResp.StatusCode)
 		w.Write(respBody)
 	}
+}
+
+// Calendar fetches events from Home Assistant for a given date.
+// GET /api/calendar?date=YYYY-MM-DD (defaults to today)
+func (h *Handler) Calendar(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAuth(w, r) {
+		return
+	}
+	if h.haBaseURL == "" || h.haToken == "" {
+		http.Error(w, `{"error":"HA not configured"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	date := r.URL.Query().Get("date")
+	if date == "" {
+		date = time.Now().Format("2006-01-02")
+	}
+	// Calculate next day for the range end
+	t, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		http.Error(w, `{"error":"invalid date format, use YYYY-MM-DD"}`, http.StatusBadRequest)
+		return
+	}
+	nextDay := t.AddDate(0, 0, 1).Format("2006-01-02")
+
+	// Phase 1: get calendar list
+	calendars, err := h.fetchCalendarList(r)
+	if err != nil {
+		log.Printf("[calendar] list error: %v", err)
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusBadGateway)
+		return
+	}
+
+	// Phase 2: fetch events from each calendar in parallel
+	var allEvents []model.CalendarEvent
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	for calIdx, calID := range calendars {
+		wg.Add(1)
+		go func(idx int, entityID string) {
+			defer wg.Done()
+			events, err := h.fetchCalendarEvents(r, entityID, date, nextDay, idx)
+			if err != nil {
+				log.Printf("[calendar] events error for %s: %v", entityID, err)
+				return
+			}
+			mu.Lock()
+			allEvents = append(allEvents, events...)
+			mu.Unlock()
+		}(calIdx, calID)
+	}
+	wg.Wait()
+
+	// Sort: all-day first, then by start time
+	sort.Slice(allEvents, func(i, j int) bool {
+		ki := allEvents[i].StartHour*100 + allEvents[i].StartMin
+		kj := allEvents[j].StartHour*100 + allEvents[j].StartMin
+		if allEvents[i].AllDay {
+			ki = -1
+		}
+		if allEvents[j].AllDay {
+			kj = -1
+		}
+		return ki < kj
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(allEvents)
+}
+
+func (h *Handler) fetchCalendarList(r *http.Request) ([]string, error) {
+	req, err := http.NewRequestWithContext(r.Context(), "GET", h.haBaseURL+"/api/calendars", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+h.haToken)
+
+	resp, err := h.haClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	var cals []struct {
+		EntityID string `json:"entity_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&cals); err != nil {
+		return nil, err
+	}
+
+	var out []string
+	for _, c := range cals {
+		if strings.Contains(c.EntityID, "workday_sensor") {
+			continue
+		}
+		out = append(out, c.EntityID)
+	}
+	return out, nil
+}
+
+func (h *Handler) fetchCalendarEvents(r *http.Request, entityID, date, nextDay string, calIdx int) ([]model.CalendarEvent, error) {
+	u := fmt.Sprintf("%s/api/calendars/%s?start=%sT00:00:00&end=%sT00:00:00",
+		h.haBaseURL, entityID, date, nextDay)
+	req, err := http.NewRequestWithContext(r.Context(), "GET", u, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+h.haToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := h.haClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	var rawEvents []struct {
+		Summary string `json:"summary"`
+		Start   struct {
+			Date     string `json:"date"`
+			DateTime string `json:"dateTime"`
+		} `json:"start"`
+		End struct {
+			DateTime string `json:"dateTime"`
+		} `json:"end"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&rawEvents); err != nil {
+		return nil, err
+	}
+
+	var events []model.CalendarEvent
+	for _, e := range rawEvents {
+		ev := model.CalendarEvent{
+			Summary: e.Summary,
+			CalIdx:  calIdx,
+		}
+		if e.Start.Date != "" {
+			ev.AllDay = true
+		} else if e.Start.DateTime != "" {
+			ev.StartHour, ev.StartMin = parseTime(e.Start.DateTime)
+			ev.EndHour, ev.EndMin = parseTime(e.End.DateTime)
+		}
+		events = append(events, ev)
+	}
+	return events, nil
+}
+
+// parseTime extracts HH:MM from "2026-04-01T09:30:00+02:00" or "2026-04-01T09:30:00"
+func parseTime(dt string) (int, int) {
+	// Find the T separator
+	idx := strings.IndexByte(dt, 'T')
+	if idx < 0 || idx+6 > len(dt) {
+		return 0, 0
+	}
+	timePart := dt[idx+1:]
+	var h, m int
+	fmt.Sscanf(timePart, "%d:%d", &h, &m)
+	return h, m
 }

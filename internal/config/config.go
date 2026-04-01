@@ -29,6 +29,15 @@ type Config struct {
 	HALights   []string
 	HACacheTTL time.Duration
 
+	WeatherLat      string
+	WeatherLon      string
+	WeatherTZ       string
+	WeatherCacheTTL time.Duration
+
+	TransportBaseURL  string
+	TransportStops    []string
+	TransportCacheTTL time.Duration
+
 	FetchTimeout time.Duration
 }
 
@@ -54,6 +63,15 @@ func Load() *Config {
 		HASensors:  envList("HA_SENSORS"),
 		HALights:   envList("HA_LIGHTS"),
 		HACacheTTL: envDuration("HA_CACHE_TTL", 120),
+
+		WeatherLat:      envStr("WEATHER_LAT", "44.82"),
+		WeatherLon:      envStr("WEATHER_LON", "20.46"),
+		WeatherTZ:       envStr("WEATHER_TZ", "Europe/Belgrade"),
+		WeatherCacheTTL: envDuration("WEATHER_CACHE_TTL", 1800),
+
+		TransportBaseURL:  envStr("TRANSPORT_BASE_URL", ""),
+		TransportStops:    envList("TRANSPORT_STOPS"),
+		TransportCacheTTL: envDuration("TRANSPORT_CACHE_TTL", 30),
 
 		FetchTimeout: envDuration("FETCH_TIMEOUT", 5),
 	}
