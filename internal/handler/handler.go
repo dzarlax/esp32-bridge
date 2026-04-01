@@ -16,16 +16,29 @@ import (
 )
 
 type Handler struct {
-	orch      *fetcher.Orchestrator
-	apiKey    string
-	haBaseURL string
-	haToken   string
-	haClient  *http.Client
-	startAt   time.Time
+	orch             *fetcher.Orchestrator
+	apiKey           string
+	haBaseURL        string
+	haToken          string
+	haClient         *http.Client
+	startAt          time.Time
+	otaVersion       string
+	otaFirmwareURL   string
+	otaGitHubToken   string
+	migrateBridgeURL string
+	fwCache          []byte // cached firmware binary
+	fwCacheURL       string // URL the cache was fetched from
 }
 
 func New(orch *fetcher.Orchestrator, apiKey, haBaseURL, haToken string, haClient *http.Client) *Handler {
 	return &Handler{orch: orch, apiKey: apiKey, haBaseURL: haBaseURL, haToken: haToken, haClient: haClient, startAt: time.Now()}
+}
+
+func (h *Handler) SetOTA(version, firmwareURL, ghToken, migrateBridgeURL string) {
+	h.otaVersion = version
+	h.otaFirmwareURL = firmwareURL
+	h.otaGitHubToken = ghToken
+	h.migrateBridgeURL = migrateBridgeURL
 }
 
 func (h *Handler) requireAuth(w http.ResponseWriter, r *http.Request) bool {
@@ -61,6 +74,9 @@ func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 		} else {
 			fmt.Fprintf(w, `,"%s":%s`, key, data)
 		}
+	}
+	if h.migrateBridgeURL != "" {
+		fmt.Fprintf(w, `,"config":{"bridge_url":"%s"}`, h.migrateBridgeURL)
 	}
 	w.Write([]byte("}"))
 }
@@ -327,4 +343,86 @@ func parseTime(dt string) (int, int) {
 	var h, m int
 	fmt.Sscanf(timePart, "%d:%d", &h, &m)
 	return h, m
+}
+
+// OTACheck reports whether a firmware update is available.
+// GET /api/ota/check?v=1.0.0
+func (h *Handler) OTACheck(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAuth(w, r) {
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+
+	if h.otaVersion == "" {
+		fmt.Fprintf(w, `{"update":false}`)
+		return
+	}
+
+	clientVersion := r.URL.Query().Get("v")
+	if clientVersion == h.otaVersion {
+		fmt.Fprintf(w, `{"update":false}`)
+		return
+	}
+
+	fmt.Fprintf(w, `{"update":true,"version":"%s"}`, h.otaVersion)
+}
+
+// OTAFirmware streams the firmware binary to the ESP32.
+// GET /api/ota/firmware
+func (h *Handler) OTAFirmware(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAuth(w, r) {
+		return
+	}
+
+	if h.otaFirmwareURL == "" {
+		http.Error(w, `{"error":"OTA not configured"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	// Serve from cache if URL matches
+	if h.fwCache != nil && h.fwCacheURL == h.otaFirmwareURL {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(h.fwCache)))
+		w.Write(h.fwCache)
+		return
+	}
+
+	// Download from GitHub
+	req, err := http.NewRequestWithContext(r.Context(), "GET", h.otaFirmwareURL, nil)
+	if err != nil {
+		http.Error(w, `{"error":"failed to create request"}`, http.StatusInternalServerError)
+		return
+	}
+	req.Header.Set("Accept", "application/octet-stream")
+	if h.otaGitHubToken != "" {
+		req.Header.Set("Authorization", "token "+h.otaGitHubToken)
+	}
+
+	resp, err := h.haClient.Do(req)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		http.Error(w, fmt.Sprintf(`{"error":"GitHub HTTP %d"}`, resp.StatusCode), resp.StatusCode)
+		return
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		http.Error(w, `{"error":"failed to read firmware"}`, http.StatusBadGateway)
+		return
+	}
+
+	// Cache for subsequent requests
+	h.fwCache = data
+	h.fwCacheURL = h.otaFirmwareURL
+
+	log.Printf("[ota] cached firmware %d bytes from %s", len(data), h.otaFirmwareURL)
+
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+	w.Write(data)
 }

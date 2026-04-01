@@ -61,11 +61,18 @@ func main() {
 
 	orch := fetcher.NewOrchestrator(fetchers, c, cfg.FetchTimeout)
 	h := handler.New(orch, cfg.APIKey, cfg.HABaseURL, cfg.HAToken, client)
+	h.SetOTA(cfg.OTAFirmwareVersion, cfg.OTAFirmwareURL, cfg.OTAGitHubToken, cfg.MigrateBridgeURL)
+
+	if cfg.OTAFirmwareVersion != "" {
+		log.Printf("OTA: version %s", cfg.OTAFirmwareVersion)
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/dashboard", h.Dashboard)
 	mux.HandleFunc("/api/ha/action", h.HAAction)
 	mux.HandleFunc("/api/calendar", h.Calendar)
+	mux.HandleFunc("/api/ota/check", h.OTACheck)
+	mux.HandleFunc("/api/ota/firmware", h.OTAFirmware)
 	mux.HandleFunc("/health", h.Health)
 
 	log.Printf("esp32-bridge listening on %s (%d fetchers)", cfg.ListenAddr, len(fetchers))
