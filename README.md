@@ -128,8 +128,8 @@ go run cmd/server/main.go  # Run locally
 ## Related
 
 - [HomeDash](https://github.com/dzarlax/homedash) — ESP32 display firmware that consumes this API
-- [Health Dashboard](https://github.com/dzarlax/health_dashboard) — Apple Watch + RingConn health metrics aggregator
-- [Evening News](https://github.com/dzarlax/rss-summarizer) — AI-powered news aggregator with summaries and categorization
+- [Health Dashboard](https://github.com/Dzarlax-AI/health_dashboard) — Apple Health data ingestion, readiness scoring, web UI and MCP server
+- [Evening News](https://github.com/Dzarlax-AI/evening-news) — AI-powered news aggregator with summaries and categorization
 - [City Dashboard](https://github.com/dzarlax/city-dashboard) — Belgrade/Novi Sad/Niš public transit: schedules, routes, and real-time arrivals where available
 
 ## License
