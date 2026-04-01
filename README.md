@@ -128,6 +128,8 @@ go run cmd/server/main.go  # Run locally
 ## Related
 
 - [HomeDash](https://github.com/dzarlax/homedash) — ESP32 display firmware that consumes this API
+- [Health Dashboard](https://github.com/dzarlax/health_dashboard) — Apple Watch + RingConn health metrics aggregator
+- [City Dashboard](https://github.com/dzarlax/city-dashboard) — Belgrade/Novi Sad/Niš public transit: schedules, routes, and real-time arrivals where available
 
 ## License
 
