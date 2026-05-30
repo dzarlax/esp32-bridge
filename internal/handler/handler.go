@@ -269,6 +269,7 @@ func (h *Handler) fetchCalendarList(r *http.Request) ([]string, error) {
 
 	var cals []struct {
 		EntityID string `json:"entity_id"`
+		Name     string `json:"name"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&cals); err != nil {
 		return nil, err
@@ -276,12 +277,19 @@ func (h *Handler) fetchCalendarList(r *http.Request) ([]string, error) {
 
 	var out []string
 	for _, c := range cals {
-		if strings.Contains(c.EntityID, "workday_sensor") {
+		if isIgnoredCalendar(c.EntityID, c.Name) {
 			continue
 		}
 		out = append(out, c.EntityID)
 	}
 	return out, nil
+}
+
+func isIgnoredCalendar(entityID, name string) bool {
+	calendarText := strings.ToLower(entityID + " " + name)
+	return strings.Contains(calendarText, "workday_sensor") ||
+		strings.Contains(calendarText, "microsoft") ||
+		strings.Contains(calendarText, "outlook")
 }
 
 func (h *Handler) fetchCalendarEvents(r *http.Request, entityID, date, nextDay string, calIdx int) ([]model.CalendarEvent, error) {
