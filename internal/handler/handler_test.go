@@ -17,6 +17,8 @@ func TestFetchCalendarListFiltersIgnoredCalendars(t *testing.T) {
 			{"entity_id":"calendar.personal_gmail","name":"Personal Gmail"},
 			{"entity_id":"calendar.work_microsoft","name":"Work Microsoft"},
 			{"entity_id":"calendar.family","name":"Family Outlook"},
+			{"entity_id":"calendar.worc_calendar_kalendar","name":"Календарь"},
+			{"entity_id":"calendar.rabochii","name":"Рабочий"},
 			{"entity_id":"calendar.workday_sensor","name":"Workday Sensor"}
 		]`))
 	}))
@@ -30,7 +32,7 @@ func TestFetchCalendarListFiltersIgnoredCalendars(t *testing.T) {
 		t.Fatalf("fetchCalendarList returned error: %v", err)
 	}
 
-	want := []string{"calendar.personal_gmail"}
+	want := []string{"calendar.personal_gmail", "calendar.rabochii"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("fetchCalendarList() = %#v, want %#v", got, want)
 	}

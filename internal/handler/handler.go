@@ -286,6 +286,10 @@ func (h *Handler) fetchCalendarList(r *http.Request) ([]string, error) {
 }
 
 func isIgnoredCalendar(entityID, name string) bool {
+	if entityID == "calendar.worc_calendar_kalendar" {
+		return true
+	}
+
 	calendarText := strings.ToLower(entityID + " " + name)
 	return strings.Contains(calendarText, "workday_sensor") ||
 		strings.Contains(calendarText, "microsoft") ||
