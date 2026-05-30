@@ -32,7 +32,7 @@ func TestFetchCalendarListFiltersIgnoredCalendars(t *testing.T) {
 		t.Fatalf("fetchCalendarList returned error: %v", err)
 	}
 
-	want := []string{"calendar.personal_gmail", "calendar.rabochii"}
+	want := []string{"calendar.personal_gmail", "calendar.worc_calendar_kalendar"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("fetchCalendarList() = %#v, want %#v", got, want)
 	}
