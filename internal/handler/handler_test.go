@@ -24,7 +24,7 @@ func TestFetchCalendarListFiltersIgnoredCalendars(t *testing.T) {
 	}))
 	defer ha.Close()
 
-	h := New(nil, "", ha.URL, "token", ha.Client())
+	h := New(nil, "", ha.URL, "token", nil, ha.Client())
 	req := httptest.NewRequest(http.MethodGet, "/api/calendar", nil)
 
 	got, err := h.fetchCalendarList(req)

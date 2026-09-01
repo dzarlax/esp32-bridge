@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +21,7 @@ type Handler struct {
 	apiKey           string
 	haBaseURL        string
 	haToken          string
+	haLights         map[string]struct{}
 	haClient         *http.Client
 	startAt          time.Time
 	otaGitHubRepo    string // "owner/repo"
@@ -31,10 +33,15 @@ type Handler struct {
 	otaCheckedAt     time.Time
 	fwCache          []byte
 	fwCacheVersion   string
+	otaMu            sync.Mutex
 }
 
-func New(orch *fetcher.Orchestrator, apiKey, haBaseURL, haToken string, haClient *http.Client) *Handler {
-	return &Handler{orch: orch, apiKey: apiKey, haBaseURL: haBaseURL, haToken: haToken, haClient: haClient, startAt: time.Now()}
+func New(orch *fetcher.Orchestrator, apiKey, haBaseURL, haToken string, haLights []string, haClient *http.Client) *Handler {
+	allowed := make(map[string]struct{}, len(haLights))
+	for _, id := range haLights {
+		allowed[id] = struct{}{}
+	}
+	return &Handler{orch: orch, apiKey: apiKey, haBaseURL: haBaseURL, haToken: haToken, haLights: allowed, haClient: haClient, startAt: time.Now()}
 }
 
 func (h *Handler) SetOTA(ghRepo, ghToken, migrateBridgeURL string) {
@@ -44,9 +51,6 @@ func (h *Handler) SetOTA(ghRepo, ghToken, migrateBridgeURL string) {
 }
 
 func (h *Handler) requireAuth(w http.ResponseWriter, r *http.Request) bool {
-	if h.apiKey == "" {
-		return true
-	}
 	key := r.Header.Get("X-API-Key")
 	if key == "" {
 		key = r.URL.Query().Get("key")
@@ -120,6 +124,10 @@ func (h *Handler) HAAction(w http.ResponseWriter, r *http.Request) {
 	// Validate entity_id starts with light.
 	if !strings.HasPrefix(req.EntityID, "light.") {
 		http.Error(w, `{"error":"only light entities supported"}`, http.StatusBadRequest)
+		return
+	}
+	if _, ok := h.haLights[req.EntityID]; !ok {
+		http.Error(w, `{"error":"light not configured"}`, http.StatusForbidden)
 		return
 	}
 
@@ -362,6 +370,12 @@ func parseTime(dt string) (int, int) {
 // refreshLatestRelease fetches the latest release from GitHub API.
 // Caches result for 5 minutes to avoid rate limiting.
 func (h *Handler) refreshLatestRelease() {
+	h.otaMu.Lock()
+	defer h.otaMu.Unlock()
+	h.refreshLatestReleaseLocked()
+}
+
+func (h *Handler) refreshLatestReleaseLocked() {
 	if h.otaGitHubRepo == "" {
 		return
 	}
@@ -404,6 +418,10 @@ func (h *Handler) refreshLatestRelease() {
 
 	// Strip "v" prefix from tag: "v1.0.1" → "1.0.1"
 	version := strings.TrimPrefix(release.TagName, "v")
+	if _, ok := parseVersion(version); !ok {
+		log.Printf("[ota] invalid release version: %q", release.TagName)
+		return
+	}
 
 	// Find firmware.bin asset
 	var fwURL string
@@ -435,7 +453,9 @@ func (h *Handler) OTACheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.refreshLatestRelease()
+	h.otaMu.Lock()
+	defer h.otaMu.Unlock()
+	h.refreshLatestReleaseLocked()
 
 	if h.otaLatestVersion == "" {
 		fmt.Fprintf(w, `{"update":false}`)
@@ -443,7 +463,7 @@ func (h *Handler) OTACheck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	clientVersion := r.URL.Query().Get("v")
-	if clientVersion == h.otaLatestVersion {
+	if compareVersions(h.otaLatestVersion, clientVersion) <= 0 {
 		fmt.Fprintf(w, `{"update":false}`)
 		return
 	}
@@ -458,7 +478,9 @@ func (h *Handler) OTAFirmware(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.refreshLatestRelease()
+	h.otaMu.Lock()
+	defer h.otaMu.Unlock()
+	h.refreshLatestReleaseLocked()
 
 	if h.otaLatestURL == "" {
 		http.Error(w, `{"error":"no release found"}`, http.StatusServiceUnavailable)
@@ -510,4 +532,43 @@ func (h *Handler) OTAFirmware(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
 	w.Write(data)
+}
+
+func parseVersion(s string) ([3]int, bool) {
+	var v [3]int
+	parts := strings.Split(s, ".")
+	if len(parts) != 3 {
+		return v, false
+	}
+	for i, part := range parts {
+		if part == "" {
+			return v, false
+		}
+		n, err := strconv.Atoi(part)
+		if err != nil || n < 0 {
+			return v, false
+		}
+		v[i] = n
+	}
+	return v, true
+}
+
+func compareVersions(remote, client string) int {
+	r, ok := parseVersion(strings.TrimPrefix(remote, "v"))
+	if !ok {
+		return -1
+	}
+	c, ok := parseVersion(strings.TrimPrefix(client, "v"))
+	if !ok {
+		return -1
+	}
+	for i := range r {
+		if r[i] > c[i] {
+			return 1
+		}
+		if r[i] < c[i] {
+			return -1
+		}
+	}
+	return 0
 }
