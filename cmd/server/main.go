@@ -13,6 +13,9 @@ import (
 
 func main() {
 	cfg := config.Load()
+	if err := cfg.Validate(); err != nil {
+		log.Fatal(err)
+	}
 
 	client := &http.Client{
 		Timeout: 10 * time.Second,
@@ -60,7 +63,7 @@ func main() {
 	}
 
 	orch := fetcher.NewOrchestrator(fetchers, c, cfg.FetchTimeout)
-	h := handler.New(orch, cfg.APIKey, cfg.HABaseURL, cfg.HAToken, client)
+	h := handler.New(orch, cfg.APIKey, cfg.HABaseURL, cfg.HAToken, cfg.HALights, client)
 	h.SetOTA(cfg.OTAGitHubRepo, cfg.OTAGitHubToken, cfg.MigrateBridgeURL)
 
 	if cfg.OTAGitHubRepo != "" {

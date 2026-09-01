@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -11,8 +12,8 @@ type Config struct {
 	ListenAddr string
 	APIKey     string
 
-	HealthBaseURL string
-	HealthAPIKey  string
+	HealthBaseURL  string
+	HealthAPIKey   string
 	HealthCacheTTL time.Duration
 
 	TodoistToken    string
@@ -83,6 +84,13 @@ func Load() *Config {
 
 		FetchTimeout: envDuration("FETCH_TIMEOUT", 5),
 	}
+}
+
+func (c *Config) Validate() error {
+	if c.APIKey == "" {
+		return fmt.Errorf("API_KEY is required")
+	}
+	return nil
 }
 
 func envStr(key, def string) string {
