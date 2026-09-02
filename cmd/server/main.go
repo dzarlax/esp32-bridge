@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"time"
+	_ "time/tzdata" // Include IANA zones in the minimal production container.
 
 	"esp32-bridge/internal/cache"
 	"esp32-bridge/internal/config"
