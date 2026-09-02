@@ -93,7 +93,7 @@
   <section class="approval">
     <h2>Actual changes and checks</h2>
     <p>Approved 2026-09-02. Bridge now maps Evening News <code>summary</code> to compact field <code>s</code>; a focused fetcher test confirms original <code>content</code> is not emitted. HomeDash now stores <code>s</code> in a bounded 1536-byte field per news item, renders it in the reader, and falls back when absent. The day-change handler refreshes the seven-day strip and requests the new current day unless a manual date selection is active.</p>
-    <p>Checks run before delivery: <code>go test ./...</code>, <code>make -C sim clean all</code>, <code>pio run</code>, and <code>git diff --check</code>. Remaining delivery checks: live Bridge payload, running container, published firmware asset, and OTA availability.</p>
+    <p>Checks run: <code>go test ./...</code>, <code>make -C sim clean all</code>, <code>pio run</code>, and <code>git diff --check</code>. Bridge image from commit <code>f26050c</code> was pulled and restarted as the scoped <code>esp32-bridge</code> service; its health endpoint returned OK, the live dashboard reported <code>summary_field=present</code> and <code>original_content=absent</code>. HomeDash v1.0.11 was released with <code>firmware.bin</code> uploaded, and the live OTA check for v1.0.10 returned <code>update=true</code>, <code>version=1.0.11</code>.</p>
   </section>
 </main>
 </body>
