@@ -103,6 +103,16 @@
     </ul>
   </section>
 
+  <section><h2>Production rollout: 2 сентября 2026</h2>
+    <ul>
+      <li>Из Calendar Platform в Bridge настроен отдельный существующий native read token без его вывода или записи в Git. В allowlist включены все шесть доступных календарей, в фиксированном порядке цветов.</li>
+      <li>Первый образ после <code>ac71a81</code> перезапускался: минимальный контейнер не содержал IANA timezone database. Он был сразу возвращён на предыдущий работающий image; инцидент не затронул Calendar Platform или секреты.</li>
+      <li>Исправление <code>04434ed</code> добавило <code>time/tzdata</code> в бинарник. Его CI завершилась успешно, финальный образ запущен и стабилен.</li>
+      <li>Подтверждены health процесса и реальный authenticated путь <code>/api/calendar</code>: на 4 и 5 сентября Bridge вернул по одному событию, что совпадает с двумя событиями Calendar Platform за неделю 2–8 сентября; остальные даты в этом окне пусты.</li>
+      <li>Выпуск OTA не требовался: формат <code>/api/calendar</code> и код прошивки не менялись.</li>
+    </ul>
+  </section>
+
   <section class="risk"><h2>Риски и откат</h2>
     <ul>
       <li>Неверный canonical ID или токен даст пустой/401 ответ; до cutover это обнаружит authenticated <code>/bootstrap</code> и проверка Bridge endpoint.</li>
