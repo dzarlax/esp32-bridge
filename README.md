@@ -71,6 +71,7 @@ All configuration is via environment variables:
 | `HA_TOKEN` | | Home Assistant long-lived access token |
 | `HA_SENSORS` | | Comma-separated sensor entity IDs |
 | `HA_LIGHTS` | | Comma-separated light entity IDs |
+| `HA_CLIMATES` | | Comma-separated climate entity IDs allowed on the display |
 | `HA_CACHE_TTL` | `120` | Cache TTL in seconds |
 | `WEATHER_LAT` | `44.82` | Latitude for Open-Meteo |
 | `WEATHER_LON` | `20.46` | Longitude for Open-Meteo |

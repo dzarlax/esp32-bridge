@@ -22,6 +22,7 @@ type Handler struct {
 	haBaseURL        string
 	haToken          string
 	haLights         map[string]struct{}
+	haClimates       map[string]struct{}
 	haClient         *http.Client
 	startAt          time.Time
 	otaGitHubRepo    string // "owner/repo"
@@ -36,12 +37,16 @@ type Handler struct {
 	otaMu            sync.Mutex
 }
 
-func New(orch *fetcher.Orchestrator, apiKey, haBaseURL, haToken string, haLights []string, haClient *http.Client) *Handler {
-	allowed := make(map[string]struct{}, len(haLights))
+func New(orch *fetcher.Orchestrator, apiKey, haBaseURL, haToken string, haLights, haClimates []string, haClient *http.Client) *Handler {
+	allowedLights := make(map[string]struct{}, len(haLights))
 	for _, id := range haLights {
-		allowed[id] = struct{}{}
+		allowedLights[id] = struct{}{}
 	}
-	return &Handler{orch: orch, apiKey: apiKey, haBaseURL: haBaseURL, haToken: haToken, haLights: allowed, haClient: haClient, startAt: time.Now()}
+	allowedClimates := make(map[string]struct{}, len(haClimates))
+	for _, id := range haClimates {
+		allowedClimates[id] = struct{}{}
+	}
+	return &Handler{orch: orch, apiKey: apiKey, haBaseURL: haBaseURL, haToken: haToken, haLights: allowedLights, haClimates: allowedClimates, haClient: haClient, startAt: time.Now()}
 }
 
 func (h *Handler) SetOTA(ghRepo, ghToken, migrateBridgeURL string) {
@@ -62,7 +67,7 @@ func (h *Handler) requireAuth(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-var sectionKeys = []string{"health", "tasks", "news", "sensors", "lights", "weather", "transport"}
+var sectionKeys = []string{"health", "tasks", "news", "sensors", "lights", "climate", "weather", "transport"}
 
 func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAuth(w, r) {
@@ -93,7 +98,7 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `{"status":"ok","uptime":%d}`, uptime)
 }
 
-// HAAction proxies light control commands to Home Assistant.
+// HAAction proxies explicitly allowed light and climate commands to Home Assistant.
 // POST /api/ha/action with JSON body:
 //
 //	{"entity_id": "light.office_light", "action": "toggle"}
@@ -112,49 +117,46 @@ func (h *Handler) HAAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		EntityID   string `json:"entity_id"`
-		Action     string `json:"action"` // toggle, turn_on, turn_off
-		Brightness *int   `json:"brightness,omitempty"`
+		EntityID    string   `json:"entity_id"`
+		Action      string   `json:"action"`
+		Brightness  *int     `json:"brightness,omitempty"`
+		Temperature *float64 `json:"temperature,omitempty"`
+		HVACMode    string   `json:"hvac_mode,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
 		return
 	}
 
-	// Validate entity_id starts with light.
-	if !strings.HasPrefix(req.EntityID, "light.") {
-		http.Error(w, `{"error":"only light entities supported"}`, http.StatusBadRequest)
-		return
-	}
-	if _, ok := h.haLights[req.EntityID]; !ok {
-		http.Error(w, `{"error":"light not configured"}`, http.StatusForbidden)
+	domain, service, cacheKey, err := h.haServiceForAction(req.EntityID, req.Action)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
 		return
 	}
 
-	// Map action to HA service
-	service := "toggle"
-	switch req.Action {
-	case "turn_on":
-		service = "turn_on"
-	case "turn_off":
-		service = "turn_off"
-	case "toggle":
-		service = "toggle"
-	default:
-		http.Error(w, `{"error":"unknown action"}`, http.StatusBadRequest)
-		return
-	}
-
-	// Build HA service call body
 	body := map[string]interface{}{
 		"entity_id": req.EntityID,
 	}
-	if req.Brightness != nil && service == "turn_on" {
+	if domain == "light" && req.Brightness != nil && service == "turn_on" {
 		body["brightness"] = *req.Brightness
+	}
+	if domain == "climate" && service == "set_temperature" {
+		if req.Temperature == nil || *req.Temperature < 16 || *req.Temperature > 30 {
+			http.Error(w, `{"error":"temperature must be between 16 and 30"}`, http.StatusBadRequest)
+			return
+		}
+		body["temperature"] = *req.Temperature
+	}
+	if domain == "climate" && service == "set_hvac_mode" {
+		if !allowedHVACMode(req.HVACMode) {
+			http.Error(w, `{"error":"unsupported climate mode"}`, http.StatusBadRequest)
+			return
+		}
+		body["hvac_mode"] = req.HVACMode
 	}
 
 	bodyJSON, _ := json.Marshal(body)
-	haURL := fmt.Sprintf("%s/api/services/light/%s", h.haBaseURL, service)
+	haURL := fmt.Sprintf("%s/api/services/%s/%s", h.haBaseURL, domain, service)
 	haReq, err := http.NewRequestWithContext(r.Context(), "POST", haURL, strings.NewReader(string(bodyJSON)))
 	if err != nil {
 		http.Error(w, `{"error":"failed to create request"}`, http.StatusInternalServerError)
@@ -170,16 +172,20 @@ func (h *Handler) HAAction(w http.ResponseWriter, r *http.Request) {
 	}
 	defer haResp.Body.Close()
 
-	// Invalidate lights cache so next dashboard fetch gets fresh state
-	h.orch.Invalidate("lights")
+	if h.orch != nil {
+		h.orch.Invalidate(cacheKey)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if haResp.StatusCode == 200 {
-		// Fetch fresh lights state after toggle
+		// Fetch fresh state after a successful action.
 		time.Sleep(200 * time.Millisecond)
-		lights := h.orch.FetchOne("lights")
-		if lights != nil {
-			fmt.Fprintf(w, `{"ok":true,"lights":%s}`, lights)
+		var data json.RawMessage
+		if h.orch != nil {
+			data = h.orch.FetchOne(cacheKey)
+		}
+		if data != nil {
+			fmt.Fprintf(w, `{"ok":true,"%s":%s}`, cacheKey, data)
 		} else {
 			fmt.Fprintf(w, `{"ok":true}`)
 		}
@@ -187,6 +193,41 @@ func (h *Handler) HAAction(w http.ResponseWriter, r *http.Request) {
 		respBody, _ := io.ReadAll(haResp.Body)
 		w.WriteHeader(haResp.StatusCode)
 		w.Write(respBody)
+	}
+}
+
+func (h *Handler) haServiceForAction(entityID, action string) (domain, service, cacheKey string, err error) {
+	if strings.HasPrefix(entityID, "light.") {
+		if _, ok := h.haLights[entityID]; !ok {
+			return "", "", "", fmt.Errorf("light not configured")
+		}
+		switch action {
+		case "turn_on", "turn_off", "toggle":
+			return "light", action, "lights", nil
+		default:
+			return "", "", "", fmt.Errorf("unknown light action")
+		}
+	}
+	if strings.HasPrefix(entityID, "climate.") {
+		if _, ok := h.haClimates[entityID]; !ok {
+			return "", "", "", fmt.Errorf("climate not configured")
+		}
+		switch action {
+		case "turn_on", "turn_off", "set_temperature", "set_hvac_mode":
+			return "climate", action, "climate", nil
+		default:
+			return "", "", "", fmt.Errorf("unknown climate action")
+		}
+	}
+	return "", "", "", fmt.Errorf("unsupported entity")
+}
+
+func allowedHVACMode(mode string) bool {
+	switch mode {
+	case "cool", "heat", "dry", "fan_only":
+		return true
+	default:
+		return false
 	}
 }
 

@@ -87,6 +87,17 @@ type LightItem struct {
 	Brightness int    `json:"br,omitempty"` // 0-255
 }
 
+// ClimateItem is the small, display-oriented view of a Home Assistant climate
+// entity. The bridge only includes explicitly configured climate entities.
+type ClimateItem struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"n"`
+	Mode        string   `json:"mode"`
+	CurrentTemp *float64 `json:"cur,omitempty"`
+	TargetTemp  *float64 `json:"target,omitempty"`
+	Modes       []string `json:"modes"`
+}
+
 type WeatherDaily struct {
 	TempMax     float64 `json:"tmax"`
 	TempMin     float64 `json:"tmin"`

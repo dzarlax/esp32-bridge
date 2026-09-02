@@ -49,6 +49,10 @@ func main() {
 		fetchers = append(fetchers, fetcher.NewLights(cfg.HABaseURL, cfg.HAToken, cfg.HALights, client, cfg.HACacheTTL))
 		log.Printf("HA lights: %s (%d lights)", cfg.HABaseURL, len(cfg.HALights))
 	}
+	if cfg.HABaseURL != "" && len(cfg.HAClimates) > 0 {
+		fetchers = append(fetchers, fetcher.NewClimate(cfg.HABaseURL, cfg.HAToken, cfg.HAClimates, client, cfg.HACacheTTL))
+		log.Printf("HA climate: %s (%d entities)", cfg.HABaseURL, len(cfg.HAClimates))
+	}
 	if cfg.WeatherLat != "" {
 		fetchers = append(fetchers, fetcher.NewWeather(cfg.WeatherLat, cfg.WeatherLon, cfg.WeatherTZ, client, cfg.WeatherCacheTTL))
 		log.Printf("Weather fetcher: lat=%s lon=%s", cfg.WeatherLat, cfg.WeatherLon)
@@ -63,7 +67,7 @@ func main() {
 	}
 
 	orch := fetcher.NewOrchestrator(fetchers, c, cfg.FetchTimeout)
-	h := handler.New(orch, cfg.APIKey, cfg.HABaseURL, cfg.HAToken, cfg.HALights, client)
+	h := handler.New(orch, cfg.APIKey, cfg.HABaseURL, cfg.HAToken, cfg.HALights, cfg.HAClimates, client)
 	h.SetOTA(cfg.OTAGitHubRepo, cfg.OTAGitHubToken, cfg.MigrateBridgeURL)
 
 	if cfg.OTAGitHubRepo != "" {

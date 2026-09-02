@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>План: экран «Дом» и кондиционер</title>
+  <style>
+    body { margin: 0; font: 16px/1.55 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #24352e; background: #f4f1ea; }
+    main { max-width: 960px; margin: 0 auto; padding: 32px 20px 48px; }
+    section { background: #fff; border: 1px solid #d7e4da; border-radius: 12px; padding: 20px; margin: 16px 0; }
+    h1, h2 { line-height: 1.2; } h1 { margin-top: 0; } h2 { font-size: 20px; }
+    code { background: #edf2ed; border-radius: 4px; padding: 2px 5px; }
+    .badge { display: inline-block; padding: 4px 10px; border-radius: 999px; background: #d7e4da; font-size: 13px; font-weight: 650; }
+    .approval { border-left: 4px solid #c58b35; } .risk { border-left: 4px solid #c96a5a; }
+    .wire { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .box { border: 1px solid #d7e4da; border-radius: 8px; padding: 12px; background: #f7faf7; min-height: 70px; }
+    .wide { grid-column: span 2; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Экран «Дом»: состояние, свет и кондиционер</h1>
+  <p class="badge">Утверждён и реализуется</p>
+
+  <section>
+    <h2>Задача</h2>
+    <p>Переработать HomeDash «Дом» в единый экран, где одинаково быстро видны воздух и климат, а управление светом остаётся доступным. Добавить управление основным кондиционером <code>climate.gostinaia</code>: включение/выключение, целевая температура и режим.</p>
+  </section>
+
+  <section>
+    <h2>Проверенные исходные данные</h2>
+    <ul>
+      <li>Текущий экран — одинаковая сетка 2×2 комнат, хотя кабинет содержит шесть датчиков, а кухня — ни одного.</li>
+      <li>Bridge передаёт датчики и свет, но не climate-сущности; <code>/api/ha/action</code> разрешает только allowlist <code>light.*</code>.</li>
+      <li>Основной доступный climate — <code>climate.gostinaia</code> (Sensibo): <code>cool</code>, <code>heat</code>, <code>fan_only</code>, <code>dry</code>, <code>heat_cool</code>, <code>off</code>. Пользователь исключил «Авто».</li>
+      <li>Второй climate — недоступный обогреватель; в интерфейс не включается.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Композиция</h2>
+    <div class="wire">
+      <div class="box"><strong>Воздух дома</strong><br>CO2 в гостиной и кабинете; PM2.5, влажность и температура — кратко, с цветовым статусом.</div>
+      <div class="box"><strong>Кондиционер · гостиная</strong><br>Текущий режим и температура; крупные +/- для цели; четыре режима: холод, тепло, осушение, вентиляция; отдельная кнопка включения/выключения.</div>
+      <div class="box wide"><strong>Комнаты и свет</strong><br>Четыре компактные комнаты в сетке 2×2: название и только доступные световые кнопки. Детальные датчики не дублируются в комнатах — они собраны в «Воздух дома».</div>
+    </div>
+    <p>Кнопка OTA остаётся в правом верхнем углу. Не добавляем сцены, яркость света, скорость вентилятора и «Авто» — это намеренно за пределами первого релиза.</p>
+  </section>
+
+  <section>
+    <h2>Контракт Bridge</h2>
+    <ul>
+      <li>Новая конфигурация <code>HA_CLIMATES</code>; в production будет только <code>climate.gostinaia</code>.</li>
+      <li>Новый cached fetcher и раздел <code>climate</code> dashboard-пейлоада: id, имя, текущий режим, текущая и целевая температура, поддерживаемые режимы.</li>
+      <li><code>POST /api/ha/action</code> расширяется строго для сущностей из <code>HA_CLIMATES</code>. Допускаются только: <code>turn_on</code>, <code>turn_off</code>, <code>set_temperature</code>, <code>set_hvac_mode</code>.</li>
+      <li>Разрешённые режимы на стороне Bridge: <code>cool</code>, <code>heat</code>, <code>dry</code>, <code>fan_only</code>. Никаких произвольных HA service/domain/entity.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Файлы и шаги</h2>
+    <ol>
+      <li><code>esp32-bridge/internal/config/config.go</code>, <code>.env.example</code>, README: добавить <code>HA_CLIMATES</code>.</li>
+      <li><code>internal/fetcher/climate.go</code>, <code>internal/model/model.go</code>, стартовая wiring-логика: получать climate в том же кеше, что HA-данные.</li>
+      <li><code>internal/handler/handler.go</code> и tests: allowlist climate и безопасное отображение четырёх команд в HA service calls.</li>
+      <li><code>homedash/src/bridge.h</code>, <code>bridge.cpp</code>, <code>main.cpp</code>: добавить bounded climate-модель, JSON parse и очередь команд.</li>
+      <li><code>homedash/src/ui_dashboard.cpp</code>: собрать новую композицию «Дом» и обработчики управления.</li>
+      <li>Обновить Bridge в production; выпустить новый HomeDash firmware только после локальной и integration-проверки.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Проверки и ручной QA</h2>
+    <ul>
+      <li>Bridge: <code>go test -race -count=1 ./...</code>; handler-тесты на rejected entity/action и допустимые payloads.</li>
+      <li>HomeDash: <code>make -C sim clean all</code>, <code>pio run</code>, <code>git diff --check</code>.</li>
+      <li>Production: Bridge health, dashboard содержит climate без секретов, каждый климатический action возвращает ожидаемый HA-статус.</li>
+      <li>Устройство: все режимы, +/- температуры, off/on, световые кнопки и отсутствие зависаний после ответов Bridge.</li>
+    </ul>
+  </section>
+
+  <section class="risk">
+    <h2>Риски, ограничения и откат</h2>
+    <p>Climate-команда меняет реальное состояние дома. Allowlist и фиксированный набор действий не дают дисплею стать произвольным HA-прокси. Недоступный climate всегда скрывается. При проблеме Bridge откатывается на предыдущий image, firmware — на предыдущий OTA release; световой интерфейс продолжает работать независимо.</p>
+  </section>
+
+  <section class="approval">
+    <h2>Approval gate</h2>
+    <p>Реализация не начнётся до явного утверждения этого плана. После реализации план будет дополнен фактическими изменениями, проверками и ограничениями. OTA будет опубликована только после отдельного подтверждения готовности устройства.</p>
+  </section>
+
+  <section>
+    <h2>Фактический результат</h2>
+    <ul>
+      <li>Bridge получил <code>HA_CLIMATES</code>, cached climate-fetcher и раздел <code>climate</code> dashboard-пейлоада. Недоступные climate-сущности не попадают в ответ.</li>
+      <li>Climate actions ограничены allowlist и четырьмя режимами; температура валидируется в диапазоне 16–30 C. Handler-тесты покрывают допустимый payload и отклонение чужой сущности, <code>heat_cool</code> и температуры вне диапазона.</li>
+      <li>HomeDash получил bounded climate-модель, очередь команд и компактный экран: именованный воздух сверху, кондиционер с power, +/- и четырьмя режимами, снизу — 2×2 комнат со светом.</li>
+      <li>Локально пройдены <code>go test -race -count=1 ./...</code>, <code>make -C sim clean all</code>, <code>pio run</code> и <code>git diff --check</code>.</li>
+      <li>Остаётся: публикация и проверка Bridge production; firmware OTA не публикуется, пока дисплей отдельно не подтверждён готовым.</li>
+    </ul>
+  </section>
+</main>
+</body>
+</html>

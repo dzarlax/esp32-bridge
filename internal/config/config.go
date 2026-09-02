@@ -28,6 +28,7 @@ type Config struct {
 	HAToken    string
 	HASensors  []string
 	HALights   []string
+	HAClimates []string
 	HACacheTTL time.Duration
 
 	WeatherLat      string
@@ -67,6 +68,7 @@ func Load() *Config {
 		HAToken:    envStr("HA_TOKEN", ""),
 		HASensors:  envList("HA_SENSORS"),
 		HALights:   envList("HA_LIGHTS"),
+		HAClimates: envList("HA_CLIMATES"),
 		HACacheTTL: envDuration("HA_CACHE_TTL", 120),
 
 		WeatherLat:      envStr("WEATHER_LAT", "44.82"),
