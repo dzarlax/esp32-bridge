@@ -68,10 +68,14 @@ func main() {
 
 	orch := fetcher.NewOrchestrator(fetchers, c, cfg.FetchTimeout)
 	h := handler.New(orch, cfg.APIKey, cfg.HABaseURL, cfg.HAToken, cfg.HALights, cfg.HAClimates, client)
+	h.SetCalendarPlatform(cfg.CalendarPlatformBaseURL, cfg.CalendarPlatformToken, cfg.CalendarPlatformIDs, cfg.CalendarTimeZone)
 	h.SetOTA(cfg.OTAGitHubRepo, cfg.OTAGitHubToken, cfg.MigrateBridgeURL)
 
 	if cfg.OTAGitHubRepo != "" {
 		log.Printf("OTA: repo %s", cfg.OTAGitHubRepo)
+	}
+	if cfg.CalendarPlatformBaseURL != "" {
+		log.Printf("Calendar Platform: %s (%d calendars)", cfg.CalendarPlatformBaseURL, len(cfg.CalendarPlatformIDs))
 	}
 
 	mux := http.NewServeMux()

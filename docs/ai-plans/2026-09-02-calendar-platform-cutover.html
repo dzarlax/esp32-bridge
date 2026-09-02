@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>План: Calendar Platform → ESP32 Bridge</title>
+  <style>
+    :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1e293b; background: #f6f8fb; }
+    body { margin: 0; line-height: 1.55; } main { max-width: 920px; margin: 0 auto; padding: 32px 20px 56px; }
+    section { background: #fff; border: 1px solid #dbe3ee; border-radius: 12px; padding: 20px 24px; margin: 16px 0; box-shadow: 0 1px 2px #0f172a0a; }
+    h1 { margin-bottom: 6px; } h2 { font-size: 1.2rem; margin-top: 0; } code { background: #eef2f7; border-radius: 4px; padding: 1px 5px; overflow-wrap: anywhere; }
+    li { margin: 7px 0; } table { width: 100%; border-collapse: collapse; font-size: .92rem; } th, td { text-align: left; vertical-align: top; padding: 9px; border: 1px solid #dbe3ee; } th { background: #eef2f7; } .badge { display: inline-block; font-size: .8rem; font-weight: 700; color: #92400e; background: #fef3c7; padding: 4px 10px; border-radius: 999px; }
+    .risk { border-left: 4px solid #dc2626; } .approval { border-left: 4px solid #d97706; background: #fffbeb; }
+  </style>
+</head>
+<body><main>
+  <h1>Calendar Platform → ESP32 Bridge</h1>
+  <p class="badge">Одобрено · реализация готова к production rollout</p>
+
+  <section><h2>Задача</h2>
+    <p>Перевести существующий endpoint Bridge <code>GET /api/calendar?date=YYYY-MM-DD</code> с календарей Home Assistant на новый Calendar Platform из <code>calendar-mcp</code>, не меняя контракт, который уже использует HomeDash.</p>
+  </section>
+
+  <section><h2>Что работает сейчас</h2>
+    <ul>
+      <li>Bridge получает список <code>/api/calendars</code> и события каждого календаря через Home Assistant, затем отдаёт компактные поля <code>s, sh, sm, eh, em, ad, ci</code>.</li>
+      <li>Фильтрация календарей сейчас захардкожена и зависит от имён/ID Home Assistant; порядок полученного списка определяет цвет события на дисплее.</li>
+      <li>Calendar Platform уже имеет отдельный read-only native API: <code>GET /api/native/v1/events?start=RFC3339&amp;end=RFC3339&amp;calendar_id=…</code>, Bearer-аутентификацию и HTTPS-маршрут в production Compose. Ответ содержит <code>items</code> с <code>title</code>, <code>calendar_id</code>, <code>start/end.date</code> либо <code>start/end.date_time</code>, а также явный IANA <code>time_zone</code> для событий со временем.</li>
+    </ul>
+  </section>
+
+  <section><h2>Предлагаемое поведение</h2>
+    <ul>
+      <li>Bridge использует только native read API Calendar Platform и отдельный его токен; права записи не добавляются.</li>
+      <li>В Bridge появляется явный список разрешённых canonical calendar IDs (<code>CALENDAR_PLATFORM_IDS</code>). Его порядок задаёт стабильный <code>ci</code>; скрытые и рабочие календари не попадут на домашний экран случайно.</li>
+      <li>Если Calendar Platform не настроен, endpoint сохраняет текущий HA-режим. Когда заданы все новые настройки, он читает только новый источник — это позволяет безопасно сравнить ответ до переключения production.</li>
+      <li>События приводятся к локальному дню <code>Europe/Belgrade</code>: учитываются события, пересекающие выбранный день, и all-day события с корректной эксклюзивной датой окончания. Выходной JSON и прошивка не меняются.</li>
+    </ul>
+  </section>
+
+  <section><h2>Модели и маппинг данных</h2>
+    <p>Внешний контракт HomeDash не меняется. Bridge вводит внутреннюю типизированную модель ответа Calendar Platform и преобразует её в существующий компактный <code>model.CalendarEvent</code>.</p>
+    <table>
+      <thead><tr><th>Calendar Platform</th><th>Bridge / HomeDash</th><th>Правило</th></tr></thead>
+      <tbody>
+        <tr><td><code>items[].title</code></td><td><code>s</code> / <code>Summary</code></td><td>Санитизация для шрифтов ESP32; пустой заголовок становится безопасной подписью.</td></tr>
+        <tr><td><code>items[].start.date_time</code></td><td><code>sh</code>, <code>sm</code></td><td>Парсится как RFC3339; отображается в <code>Europe/Belgrade</code>, а не в timezone хоста Bridge.</td></tr>
+        <tr><td><code>items[].end.date_time</code></td><td><code>eh</code>, <code>em</code></td><td>Та же локальная зона; событие, пересекающее полночь, остаётся видимым в каждом затронутом дне.</td></tr>
+        <tr><td><code>items[].start.date</code>, <code>end.date</code></td><td><code>ad: true</code></td><td>All-day даты не переводятся через UTC. <code>end.date</code> трактуется как исключающая граница, как в iCalendar/Google Calendar.</td></tr>
+        <tr><td><code>items[].calendar_id</code></td><td><code>ci</code> / <code>CalIdx</code></td><td>Индекс равен позиции canonical ID в <code>CALENDAR_PLATFORM_IDS</code>; цвета не зависят от порядка ответа сервиса.</td></tr>
+        <tr><td><code>items[].status</code></td><td>—</td><td>Отменённые события не передаются на дисплей.</td></tr>
+        <tr><td><code>items[].id</code>, <code>provider</code>, <code>sources</code>, <code>complete</code></td><td>—</td><td>Не нужны прошивке; используются только для диагностики Bridge без выдачи лишних данных на устройство.</td></tr>
+      </tbody>
+    </table>
+    <p>Новые настройки Bridge: <code>CALENDAR_PLATFORM_BASE_URL</code>, <code>CALENDAR_PLATFORM_TOKEN</code>, <code>CALENDAR_PLATFORM_IDS</code> и <code>CALENDAR_TIME_ZONE</code> (по умолчанию <code>Europe/Belgrade</code>). Режим Calendar Platform включается только когда задан весь набор; иначе остаётся текущий HA путь.</p>
+  </section>
+
+  <section><h2>Предположения и открытый выбор</h2>
+    <ul>
+      <li>Используем именно <code>calendar-mcp</code>, а не Swift-клиент <code>calendar-app</code>.</li>
+      <li>Нужно определить фактический список календарей для HomeDash. По умолчанию предлагаю перенести только те личные календари, которые раньше не были отфильтрованы Bridge; перед production переключением сверим их canonical IDs через <code>/bootstrap</code>.</li>
+      <li>Для надёжного переключения потребуется наличие <code>CALENDAR_NATIVE_APP_TOKEN</code> в production secrets Calendar Platform и отдельные Bridge-переменные. Значения секретов не попадут в Git или в план.</li>
+    </ul>
+  </section>
+
+  <section><h2>Вероятные изменения</h2>
+    <ul>
+      <li><code>internal/config/config.go</code> — URL, токен, разрешённые IDs и timezone Calendar Platform.</li>
+      <li><code>internal/handler/handler.go</code> — клиент native API, строгий маппинг событий и выбор источника.</li>
+      <li><code>internal/handler/handler_test.go</code> и новые fixture-тесты — auth, URL/query, timezone, all-day, multi-day, ошибка одного источника и стабильные цвета.</li>
+      <li><code>.env.example</code>, <code>README.md</code> — конфигурация и точное описание источника.</li>
+      <li><code>docs/ai-plans/2026-09-02-calendar-platform-cutover.html</code> — итог реализации, проверки и rollout.</li>
+      <li>Production env/Compose для Calendar Platform и Bridge — только после кода, тестов и отдельной проверки готовности сервисов.</li>
+    </ul>
+  </section>
+
+  <section><h2>Шаги реализации и rollout</h2>
+    <ol>
+      <li>Добавить настройки, валидировать их как единый набор и не логировать токен.</li>
+      <li>Реализовать native API-клиент с Bearer-токеном и bounded timeout; для каждого configured ID отправлять query-параметр <code>calendar_id</code>.</li>
+      <li>Сконвертировать типизированный ответ в текущий <code>model.CalendarEvent</code>, санитизировать заголовок, отбрасывать отменённые/некорректные события и сортировать детерминированно.</li>
+      <li>Покрыть маппинг и fallback HA тестами, прогнать Go tests/vet и сборку образа.</li>
+      <li>Развернуть Calendar Platform с read-only native токеном и проверить с Bridge-хоста: health, <code>/bootstrap</code>, запрос одного дня без раскрытия токена и состав/время событий.</li>
+      <li>Добавить конфигурацию Bridge, развернуть только Bridge, сверить его <code>/api/calendar</code> с Calendar Platform на текущую и следующую дату, затем проверить экран «День» на дисплее.</li>
+    </ol>
+  </section>
+
+  <section><h2>Проверки</h2>
+    <ul>
+      <li><code>go test ./...</code> и <code>go vet ./...</code> в Bridge.</li>
+      <li>Существующий JSON-контракт <code>/api/calendar</code> остаётся совместимым с HomeDash.</li>
+      <li>Fixture cases: timed event с offset, событие через полночь, one-day и multi-day all-day, повторяющееся instance, пустой ответ, 401/5xx upstream.</li>
+      <li>Ручная QA: выбранный день, соседний день и экран с несколькими календарями показывают корректные время, порядок и стабильные цвета; не нужно выпускать OTA, потому что контракт прошивки не меняется.</li>
+    </ul>
+  </section>
+
+  <section><h2>Реализация: 2 сентября 2026</h2>
+    <ul>
+      <li>В Bridge добавлены <code>CALENDAR_PLATFORM_BASE_URL</code>, <code>CALENDAR_PLATFORM_TOKEN</code>, <code>CALENDAR_PLATFORM_IDS</code> и <code>CALENDAR_TIME_ZONE</code>. Неполная конфигурация отклоняется при запуске.</li>
+      <li><code>/api/calendar</code> переключается на token-защищённый native API Calendar Platform при полном наборе настроек; иначе сохраняет HA fallback.</li>
+      <li>Добавлены typed decoding, ограничение ответа 1 MiB, allowlist календарей, стабильные цветовые индексы, локальная дата <code>Europe/Belgrade</code>, фильтрация отменённых и некорректных событий.</li>
+      <li>Пройдены <code>go test ./...</code>, <code>go vet ./...</code> и <code>go build ./cmd/server</code>. Тесты покрывают Bearer auth, IDs, all-day, событие через полночь, отмену и некорректные/вне диапазона события.</li>
+    </ul>
+  </section>
+
+  <section class="risk"><h2>Риски и откат</h2>
+    <ul>
+      <li>Неверный canonical ID или токен даст пустой/401 ответ; до cutover это обнаружит authenticated <code>/bootstrap</code> и проверка Bridge endpoint.</li>
+      <li>Неявный часовой пояс и all-day end date могут сдвинуть событие на соседний день; это закрывается conversion tests и сравнением реальных двух дней.</li>
+      <li>Если новый источник недоступен после переключения, убрать новые Bridge-переменные и перезапустить Bridge: endpoint немедленно вернётся к прежнему HA-календарю. Данные календарей и прошивка не изменяются.</li>
+    </ul>
+  </section>
+
+  <section class="approval"><h2>Production rollout</h2>
+    <p>Пользователь одобрил реализацию и rollout. Перед переключением Bridge будет подтверждён health Calendar Platform и token-защищённый native API; секреты останутся только в production env. OTA для этой миграции не требуется.</p>
+  </section>
+</main></body></html>

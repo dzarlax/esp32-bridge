@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,17 +18,21 @@ import (
 )
 
 type Handler struct {
-	orch             *fetcher.Orchestrator
-	apiKey           string
-	haBaseURL        string
-	haToken          string
-	haLights         map[string]struct{}
-	haClimates       map[string]struct{}
-	haClient         *http.Client
-	startAt          time.Time
-	otaGitHubRepo    string // "owner/repo"
-	otaGitHubToken   string
-	migrateBridgeURL string
+	orch                    *fetcher.Orchestrator
+	apiKey                  string
+	haBaseURL               string
+	haToken                 string
+	haLights                map[string]struct{}
+	haClimates              map[string]struct{}
+	haClient                *http.Client
+	calendarPlatformBaseURL string
+	calendarPlatformToken   string
+	calendarPlatformIDs     []string
+	calendarLocation        *time.Location
+	startAt                 time.Time
+	otaGitHubRepo           string // "owner/repo"
+	otaGitHubToken          string
+	migrateBridgeURL        string
 	// cached latest release info
 	otaLatestVersion string
 	otaLatestURL     string
@@ -53,6 +58,23 @@ func (h *Handler) SetOTA(ghRepo, ghToken, migrateBridgeURL string) {
 	h.otaGitHubRepo = ghRepo
 	h.otaGitHubToken = ghToken
 	h.migrateBridgeURL = migrateBridgeURL
+}
+
+// SetCalendarPlatform enables Calendar Platform as the on-demand calendar
+// source only when URL, token, and an explicit allowlist are all present.
+func (h *Handler) SetCalendarPlatform(baseURL, token string, calendarIDs []string, timeZone string) {
+	h.calendarPlatformBaseURL = strings.TrimSuffix(baseURL, "/")
+	h.calendarPlatformToken = token
+	h.calendarPlatformIDs = append([]string(nil), calendarIDs...)
+	location, err := time.LoadLocation(timeZone)
+	if err != nil {
+		location = time.Local
+	}
+	h.calendarLocation = location
+}
+
+func (h *Handler) calendarPlatformEnabled() bool {
+	return h.calendarPlatformBaseURL != "" && h.calendarPlatformToken != "" && len(h.calendarPlatformIDs) > 0
 }
 
 func (h *Handler) requireAuth(w http.ResponseWriter, r *http.Request) bool {
@@ -231,28 +253,47 @@ func allowedHVACMode(mode string) bool {
 	}
 }
 
-// Calendar fetches events from Home Assistant for a given date.
+// Calendar fetches events for a given date. Calendar Platform takes precedence
+// when fully configured; otherwise Home Assistant remains the compatibility path.
 // GET /api/calendar?date=YYYY-MM-DD (defaults to today)
 func (h *Handler) Calendar(w http.ResponseWriter, r *http.Request) {
 	if !h.requireAuth(w, r) {
 		return
 	}
-	if h.haBaseURL == "" || h.haToken == "" {
-		http.Error(w, `{"error":"HA not configured"}`, http.StatusServiceUnavailable)
-		return
-	}
 
 	date := r.URL.Query().Get("date")
 	if date == "" {
-		date = time.Now().Format("2006-01-02")
+		location := h.calendarLocation
+		if location == nil {
+			location = time.Local
+		}
+		date = time.Now().In(location).Format("2006-01-02")
 	}
-	// Calculate next day for the range end
-	t, err := time.Parse("2006-01-02", date)
+	location := h.calendarLocation
+	if location == nil {
+		location = time.Local
+	}
+	dayStart, err := time.ParseInLocation("2006-01-02", date, location)
 	if err != nil {
 		http.Error(w, `{"error":"invalid date format, use YYYY-MM-DD"}`, http.StatusBadRequest)
 		return
 	}
-	nextDay := t.AddDate(0, 0, 1).Format("2006-01-02")
+	dayEnd := dayStart.AddDate(0, 0, 1)
+	if h.calendarPlatformEnabled() {
+		events, err := h.fetchCalendarPlatformEvents(r, dayStart, dayEnd)
+		if err != nil {
+			log.Printf("[calendar] Calendar Platform error: %v", err)
+			http.Error(w, `{"error":"calendar source unavailable"}`, http.StatusBadGateway)
+			return
+		}
+		writeCalendarEvents(w, events)
+		return
+	}
+	if h.haBaseURL == "" || h.haToken == "" {
+		http.Error(w, `{"error":"calendar not configured"}`, http.StatusServiceUnavailable)
+		return
+	}
+	nextDay := dayEnd.Format("2006-01-02")
 
 	// Phase 1: get calendar list
 	calendars, err := h.fetchCalendarList(r)
@@ -283,21 +324,128 @@ func (h *Handler) Calendar(w http.ResponseWriter, r *http.Request) {
 	}
 	wg.Wait()
 
-	// Sort: all-day first, then by start time
-	sort.Slice(allEvents, func(i, j int) bool {
-		ki := allEvents[i].StartHour*100 + allEvents[i].StartMin
-		kj := allEvents[j].StartHour*100 + allEvents[j].StartMin
-		if allEvents[i].AllDay {
-			ki = -1
-		}
-		if allEvents[j].AllDay {
-			kj = -1
-		}
-		return ki < kj
-	})
+	writeCalendarEvents(w, allEvents)
+}
 
+func writeCalendarEvents(w http.ResponseWriter, events []model.CalendarEvent) {
+	sort.SliceStable(events, func(i, j int) bool {
+		left, right := events[i], events[j]
+		if left.AllDay != right.AllDay {
+			return left.AllDay
+		}
+		leftTime, rightTime := left.StartHour*60+left.StartMin, right.StartHour*60+right.StartMin
+		if leftTime != rightTime {
+			return leftTime < rightTime
+		}
+		if left.CalIdx != right.CalIdx {
+			return left.CalIdx < right.CalIdx
+		}
+		return left.Summary < right.Summary
+	})
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(allEvents)
+	_ = json.NewEncoder(w).Encode(events)
+}
+
+type calendarPlatformEventTime struct {
+	Date     string `json:"date"`
+	DateTime string `json:"date_time"`
+}
+
+type calendarPlatformEvent struct {
+	CalendarID string                    `json:"calendar_id"`
+	Title      string                    `json:"title"`
+	Status     string                    `json:"status"`
+	Start      calendarPlatformEventTime `json:"start"`
+	End        calendarPlatformEventTime `json:"end"`
+}
+
+func (h *Handler) fetchCalendarPlatformEvents(r *http.Request, dayStart, dayEnd time.Time) ([]model.CalendarEvent, error) {
+	u, err := url.Parse(h.calendarPlatformBaseURL + "/api/native/v1/events")
+	if err != nil {
+		return nil, err
+	}
+	query := u.Query()
+	query.Set("start", dayStart.Format(time.RFC3339))
+	query.Set("end", dayEnd.Format(time.RFC3339))
+	for _, id := range h.calendarPlatformIDs {
+		query.Add("calendar_id", id)
+	}
+	u.RawQuery = query.Encode()
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+h.calendarPlatformToken)
+	resp, err := h.haClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("Calendar Platform HTTP %d", resp.StatusCode)
+	}
+	var payload struct {
+		Items    []calendarPlatformEvent `json:"items"`
+		Complete bool                    `json:"complete"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload); err != nil {
+		return nil, err
+	}
+	if !payload.Complete {
+		log.Printf("[calendar] Calendar Platform returned a partial result")
+	}
+	indices := make(map[string]int, len(h.calendarPlatformIDs))
+	for index, id := range h.calendarPlatformIDs {
+		indices[id] = index
+	}
+	result := make([]model.CalendarEvent, 0, len(payload.Items))
+	for _, item := range payload.Items {
+		index, allowed := indices[item.CalendarID]
+		if !allowed || strings.EqualFold(item.Status, "cancelled") {
+			continue
+		}
+		event, ok := mapCalendarPlatformEvent(item, index, dayStart, dayEnd)
+		if ok {
+			result = append(result, event)
+		}
+	}
+	return result, nil
+}
+
+func mapCalendarPlatformEvent(item calendarPlatformEvent, calendarIndex int, dayStart, dayEnd time.Time) (model.CalendarEvent, bool) {
+	event := model.CalendarEvent{Summary: model.SanitizeForDisplay(strings.TrimSpace(item.Title)), CalIdx: calendarIndex}
+	if event.Summary == "" {
+		event.Summary = "Событие"
+	}
+	if item.Start.Date != "" || item.End.Date != "" {
+		start, startErr := time.Parse("2006-01-02", item.Start.Date)
+		end, endErr := time.Parse("2006-01-02", item.End.Date)
+		if startErr != nil || endErr != nil || !end.After(start) {
+			return model.CalendarEvent{}, false
+		}
+		selected := dayStart.Format("2006-01-02")
+		if selected < item.Start.Date || selected >= item.End.Date {
+			return model.CalendarEvent{}, false
+		}
+		event.AllDay = true
+		return event, true
+	}
+	start, startErr := time.Parse(time.RFC3339, item.Start.DateTime)
+	end, endErr := time.Parse(time.RFC3339, item.End.DateTime)
+	if startErr != nil || endErr != nil || !end.After(start) || !start.Before(dayEnd) || !end.After(dayStart) {
+		return model.CalendarEvent{}, false
+	}
+	if start.Before(dayStart) {
+		start = dayStart
+	}
+	if end.After(dayEnd) {
+		end = dayEnd
+	}
+	start = start.In(dayStart.Location())
+	end = end.In(dayStart.Location())
+	event.StartHour, event.StartMin = start.Hour(), start.Minute()
+	event.EndHour, event.EndMin = end.Hour(), end.Minute()
+	return event, true
 }
 
 func (h *Handler) fetchCalendarList(r *http.Request) ([]string, error) {

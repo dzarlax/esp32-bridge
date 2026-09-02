@@ -21,7 +21,7 @@ The ESP32 has limited memory and TLS connections. Instead of making 7+ HTTPS cal
 │    Transport API ─────→ bus arrivals             │
 │                                                 │
 │  On-demand endpoints:                           │
-│    /api/calendar ────→ HA calendar events       │
+│    /api/calendar ────→ Calendar Platform events │
 │    /api/ha/action ───→ light toggle (+ fresh state) │
 │    /api/ota/check ───→ firmware version check    │
 │    /api/ota/firmware → streams firmware binary   │
@@ -36,7 +36,7 @@ The ESP32 has limited memory and TLS connections. Instead of making 7+ HTTPS cal
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/dashboard` | GET | All cached data: health, tasks, news, sensors, lights, weather, transport |
-| `/api/calendar?date=YYYY-MM-DD` | GET | On-demand HA calendar events for a date |
+| `/api/calendar?date=YYYY-MM-DD` | GET | On-demand events for a date (Calendar Platform when configured; otherwise Home Assistant) |
 | `/api/ha/action` | POST | Light toggle/on/off — returns fresh light state |
 | `/api/ota/check?v=X.Y.Z` | GET | Compares version against latest GitHub Release |
 | `/api/ota/firmware` | GET | Proxies firmware binary from GitHub Release |
@@ -73,6 +73,10 @@ All configuration is via environment variables:
 | `HA_LIGHTS` | | Comma-separated light entity IDs |
 | `HA_CLIMATES` | | Comma-separated climate entity IDs allowed on the display |
 | `HA_CACHE_TTL` | `120` | Cache TTL in seconds |
+| `CALENDAR_PLATFORM_BASE_URL` | | Calendar Platform public base URL; enable together with token and IDs |
+| `CALENDAR_PLATFORM_TOKEN` | | Read-only Calendar Platform native API bearer token |
+| `CALENDAR_PLATFORM_IDS` | | Comma-separated canonical calendar IDs, in display colour order |
+| `CALENDAR_TIME_ZONE` | `Europe/Belgrade` | IANA timezone used to select a calendar day and display its times |
 | `WEATHER_LAT` | `44.82` | Latitude for Open-Meteo |
 | `WEATHER_LON` | `20.46` | Longitude for Open-Meteo |
 | `WEATHER_TZ` | `Europe/Belgrade` | Timezone for Open-Meteo |

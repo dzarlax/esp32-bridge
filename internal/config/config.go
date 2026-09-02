@@ -31,6 +31,11 @@ type Config struct {
 	HAClimates []string
 	HACacheTTL time.Duration
 
+	CalendarPlatformBaseURL string
+	CalendarPlatformToken   string
+	CalendarPlatformIDs     []string
+	CalendarTimeZone        string
+
 	WeatherLat      string
 	WeatherLon      string
 	WeatherTZ       string
@@ -71,6 +76,11 @@ func Load() *Config {
 		HAClimates: envList("HA_CLIMATES"),
 		HACacheTTL: envDuration("HA_CACHE_TTL", 120),
 
+		CalendarPlatformBaseURL: envStr("CALENDAR_PLATFORM_BASE_URL", ""),
+		CalendarPlatformToken:   envStr("CALENDAR_PLATFORM_TOKEN", ""),
+		CalendarPlatformIDs:     envList("CALENDAR_PLATFORM_IDS"),
+		CalendarTimeZone:        envStr("CALENDAR_TIME_ZONE", "Europe/Belgrade"),
+
 		WeatherLat:      envStr("WEATHER_LAT", "44.82"),
 		WeatherLon:      envStr("WEATHER_LON", "20.46"),
 		WeatherTZ:       envStr("WEATHER_TZ", "Europe/Belgrade"),
@@ -91,6 +101,22 @@ func Load() *Config {
 func (c *Config) Validate() error {
 	if c.APIKey == "" {
 		return fmt.Errorf("API_KEY is required")
+	}
+	platformFields := 0
+	if c.CalendarPlatformBaseURL != "" {
+		platformFields++
+	}
+	if c.CalendarPlatformToken != "" {
+		platformFields++
+	}
+	if len(c.CalendarPlatformIDs) > 0 {
+		platformFields++
+	}
+	if platformFields > 0 && platformFields < 3 {
+		return fmt.Errorf("CALENDAR_PLATFORM_BASE_URL, CALENDAR_PLATFORM_TOKEN, and CALENDAR_PLATFORM_IDS must be configured together")
+	}
+	if _, err := time.LoadLocation(c.CalendarTimeZone); err != nil {
+		return fmt.Errorf("CALENDAR_TIME_ZONE must be a valid IANA time zone: %w", err)
 	}
 	return nil
 }
