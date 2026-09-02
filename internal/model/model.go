@@ -25,26 +25,26 @@ func SanitizeForDisplay(s string) string {
 }
 
 var unicodeReplacements = map[rune]string{
-	'\u2013': "-",  // en-dash
-	'\u2014': "-",  // em-dash
-	'\u2015': "-",  // horizontal bar
-	'\u2018': "'",  // left single quote
-	'\u2019': "'",  // right single quote
-	'\u201C': "\"", // left double quote
-	'\u201D': "\"", // right double quote
+	'\u2013': "-",   // en-dash
+	'\u2014': "-",   // em-dash
+	'\u2015': "-",   // horizontal bar
+	'\u2018': "'",   // left single quote
+	'\u2019': "'",   // right single quote
+	'\u201C': "\"",  // left double quote
+	'\u201D': "\"",  // right double quote
 	'\u2026': "...", // ellipsis
-	'\u2022': "*",  // bullet
-	'\u2192': "->", // right arrow
-	'\u2190': "<-", // left arrow
-	'\u00a0': " ",  // non-breaking space
-	'\u2007': " ",  // figure space
-	'\u202F': " ",  // narrow no-break space
-	'\u2009': " ",  // thin space
-	'\u200B': "",   // zero-width space
-	'\u2011': "-",  // non-breaking hyphen
-	'\u2212': "-",  // minus sign
-	'\u2217': "*",  // asterisk operator
-	'\u00D7': "x",  // multiplication sign
+	'\u2022': "*",   // bullet
+	'\u2192': "->",  // right arrow
+	'\u2190': "<-",  // left arrow
+	'\u00a0': " ",   // non-breaking space
+	'\u2007': " ",   // figure space
+	'\u202F': " ",   // narrow no-break space
+	'\u2009': " ",   // thin space
+	'\u200B': "",    // zero-width space
+	'\u2011': "-",   // non-breaking hyphen
+	'\u2212': "-",   // minus sign
+	'\u2217': "*",   // asterisk operator
+	'\u00D7': "x",   // multiplication sign
 }
 
 type HealthData struct {
@@ -69,6 +69,7 @@ type TaskItem struct {
 
 type NewsItem struct {
 	Title    string `json:"t"`
+	Summary  string `json:"s,omitempty"`
 	Category string `json:"c"`
 	HoursAgo int    `json:"h"`
 }
@@ -80,7 +81,7 @@ type SensorItem struct {
 }
 
 type LightItem struct {
-	ID         string `json:"id"`  // entity_id
+	ID         string `json:"id"` // entity_id
 	Name       string `json:"n"`
 	On         bool   `json:"on"`
 	Brightness int    `json:"br,omitempty"` // 0-255

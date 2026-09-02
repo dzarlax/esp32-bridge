@@ -23,8 +23,8 @@ func NewNews(baseURL string, limit, sinceHours int, client *http.Client, ttl tim
 	return &NewsFetcher{baseURL: baseURL, limit: limit, sinceHours: sinceHours, client: client, ttl: ttl}
 }
 
-func (f *NewsFetcher) Name() string        { return "news" }
-func (f *NewsFetcher) TTL() time.Duration   { return f.ttl }
+func (f *NewsFetcher) Name() string       { return "news" }
+func (f *NewsFetcher) TTL() time.Duration { return f.ttl }
 
 func (f *NewsFetcher) Fetch(ctx context.Context) (json.RawMessage, error) {
 	url := fmt.Sprintf("%s/api/v1/feed?limit=%d&since_hours=%d", f.baseURL, f.limit, f.sinceHours)
@@ -45,6 +45,7 @@ func (f *NewsFetcher) Fetch(ctx context.Context) (json.RawMessage, error) {
 	var apiResp struct {
 		Items []struct {
 			Title       string `json:"title"`
+			Summary     string `json:"summary"`
 			Category    string `json:"category"`
 			PublishedAt string `json:"published_at"`
 		} `json:"items"`
@@ -62,6 +63,7 @@ func (f *NewsFetcher) Fetch(ctx context.Context) (json.RawMessage, error) {
 		}
 		items = append(items, model.NewsItem{
 			Title:    model.SanitizeForDisplay(a.Title),
+			Summary:  model.SanitizeForDisplay(a.Summary),
 			Category: model.SanitizeForDisplay(a.Category),
 			HoursAgo: hoursAgo,
 		})

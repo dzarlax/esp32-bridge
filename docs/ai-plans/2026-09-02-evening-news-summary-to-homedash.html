@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Implementation Plan: Evening News summaries in HomeDash</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f6f7f9; color: #1f2937; line-height: 1.5; }
+    main { max-width: 980px; margin: 0 auto; padding: 32px; }
+    section { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin: 16px 0; }
+    h1, h2 { line-height: 1.2; }
+    code { background: #f3f4f6; padding: 2px 5px; border-radius: 4px; }
+    .badge { display: inline-block; padding: 4px 10px; border-radius: 999px; background: #e5e7eb; font-size: 12px; font-weight: 600; }
+    .risk { border-left: 4px solid #dc2626; }
+    .approval { border-left: 4px solid #d97706; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Evening News summaries in HomeDash</h1>
+  <p class="badge">Approved and in implementation</p>
+
+  <section>
+    <h2>Task summary</h2>
+    <p>Show the AI-generated Evening News summary when a user taps a news item in HomeDash. Do not transfer or render the original article text.</p>
+  </section>
+
+  <section>
+    <h2>Current behavior</h2>
+    <p>Evening News <code>GET /api/v1/feed</code> returns both <code>summary</code> and <code>content</code>. The Bridge currently reads only title, category, and publication time, then emits compact fields <code>t</code>, <code>c</code>, and <code>h</code> on <code>/api/dashboard</code>. Firmware receives only those fields; the current reader can therefore show only a complete title.</p>
+  </section>
+
+  <section>
+    <h2>Desired behavior and contract</h2>
+    <p>The Bridge will read Evening News <code>summary</code>, sanitize it for the display, and emit it as <code>s</code>. The compact dashboard news item becomes:</p>
+    <pre>{ "t": "Headline", "s": "AI-generated summary", "c": "Technology", "h": 2 }</pre>
+    <p>HomeDash will keep a short, non-scrolling title preview. Tapping the item opens the existing reader with the summary and category. If a summary is missing, the reader shows a clear “Summary unavailable” message; it never substitutes Evening News <code>content</code>.</p>
+  </section>
+
+  <section>
+    <h2>Additional approved date behavior</h2>
+    <p>When the local date changes, HomeDash must rebuild the seven-day strip, return to today unless the user explicitly selected another date, and request the new day’s calendar data from the Bridge.</p>
+  </section>
+
+  <section>
+    <h2>Likely files</h2>
+    <ul>
+      <li><code>esp32-bridge/internal/fetcher/news.go</code> — parse and sanitize <code>summary</code> from Evening News.</li>
+      <li><code>esp32-bridge/internal/model/model.go</code> — add compact JSON field <code>s</code> to <code>NewsItem</code>.</li>
+      <li><code>esp32-bridge/internal/handler/handler_test.go</code> — assert that dashboard output preserves summary and excludes original content.</li>
+      <li><code>homedash/src/bridge.h</code> and <code>homedash/src/bridge.cpp</code> — hold and parse the compact summary field.</li>
+      <li><code>homedash/src/ui_dashboard.cpp</code> — open the reader with the received summary and render a missing-summary fallback.</li>
+      <li><code>homedash/sim/stubs.cpp</code> — add realistic summary fixtures for simulator QA.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Implementation and delivery</h2>
+    <ol>
+      <li>Extend the Bridge model and fetcher with only <code>summary</code>; add tests against the dashboard payload.</li>
+      <li>Build and publish the Bridge image via its existing main-branch CI, then deploy the scoped service and verify its live <code>/api/dashboard</code> payload contains <code>s</code> but not <code>content</code>.</li>
+      <li>Extend firmware parsing and the reader UI; build the simulator and ESP32 firmware.</li>
+      <li>Release a new HomeDash firmware tag, verify GitHub uploads <code>firmware.bin</code>, and verify the Bridge OTA check offers it to the current firmware.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Verification and manual QA</h2>
+    <ul>
+      <li><code>go test ./...</code> in <code>esp32-bridge</code>.</li>
+      <li>Inspect live dashboard JSON after deployment: news entries include non-empty <code>s</code> and no original <code>content</code>.</li>
+      <li><code>make -C sim clean all</code> and <code>pio run</code> in <code>homedash</code>.</li>
+      <li>On the physical display: open a news item, read a multi-line summary, scroll it, close it, then verify another item and navigation still work.</li>
+      <li>Verify GitHub release asset and the Bridge response to <code>/api/ota/check</code>.</li>
+    </ul>
+  </section>
+
+  <section class="risk">
+    <h2>Risks, boundaries, and rollback</h2>
+    <ul>
+      <li>Summaries can be longer than the former title buffer; firmware uses a bounded field and a missing-summary fallback.</li>
+      <li>The original article body remains deliberately excluded to avoid memory pressure and avoid duplicating third-party text on the display.</li>
+      <li>Bridge and firmware are rolled out in that order. Older firmware ignores the new field safely; new firmware degrades gracefully until the Bridge is updated.</li>
+      <li>Rollback is a scoped Bridge image rollback plus OTA to the prior firmware release.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Open questions</h2>
+    <p>None for this scope. The Evening News source confirms that <code>summary</code> is the AI-generated summary and <code>content</code> is separate original text.</p>
+  </section>
+
+  <section class="approval">
+    <h2>Actual changes and checks</h2>
+    <p>Approved 2026-09-02. Bridge now maps Evening News <code>summary</code> to compact field <code>s</code>; a focused fetcher test confirms original <code>content</code> is not emitted. HomeDash now stores <code>s</code> in a bounded 1536-byte field per news item, renders it in the reader, and falls back when absent. The day-change handler refreshes the seven-day strip and requests the new current day unless a manual date selection is active.</p>
+    <p>Checks run before delivery: <code>go test ./...</code>, <code>make -C sim clean all</code>, <code>pio run</code>, and <code>git diff --check</code>. Remaining delivery checks: live Bridge payload, running container, published firmware asset, and OTA availability.</p>
+  </section>
+</main>
+</body>
+</html>
