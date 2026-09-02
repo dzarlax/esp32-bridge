@@ -96,7 +96,8 @@
       <li>Climate actions ограничены allowlist и четырьмя режимами; температура валидируется в диапазоне 16–30 C. Handler-тесты покрывают допустимый payload и отклонение чужой сущности, <code>heat_cool</code> и температуры вне диапазона.</li>
       <li>HomeDash получил bounded climate-модель, очередь команд и компактный экран: именованный воздух сверху, кондиционер с power, +/- и четырьмя режимами, снизу — 2×2 комнат со светом.</li>
       <li>Локально пройдены <code>go test -race -count=1 ./...</code>, <code>make -C sim clean all</code>, <code>pio run</code> и <code>git diff --check</code>.</li>
-      <li>Остаётся: публикация и проверка Bridge production; firmware OTA не публикуется, пока дисплей отдельно не подтверждён готовым.</li>
+      <li>Bridge production обновлён на image с climate-контрактом. Его health и dashboard проверены: в payload есть только <code>climate.gostinaia</code>, датчики и свет продолжают приходить.</li>
+      <li>HomeDash <code>v1.0.15</code> опубликован с <code>firmware.bin</code>; Bridge OTA-check для <code>v1.0.14</code> возвращает обновление до <code>v1.0.15</code>. Физическая установка не запускалась.</li>
     </ul>
   </section>
 </main>
