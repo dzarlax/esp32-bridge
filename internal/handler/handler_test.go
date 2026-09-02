@@ -92,7 +92,7 @@ func TestHAActionRejectsUnconfiguredOrUnsupportedClimateCommands(t *testing.T) {
 
 func TestCalendarUsesCalendarPlatformWithStableIndices(t *testing.T) {
 	calendarAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/native/v1/events" {
+		if r.URL.Path != "/api/native/v1/cached-events" {
 			t.Fatalf("path = %q", r.URL.Path)
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer calendar-token" {

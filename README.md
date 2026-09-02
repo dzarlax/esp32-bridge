@@ -74,7 +74,7 @@ All configuration is via environment variables:
 | `HA_CLIMATES` | | Comma-separated climate entity IDs allowed on the display |
 | `HA_CACHE_TTL` | `120` | Cache TTL in seconds |
 | `CALENDAR_PLATFORM_BASE_URL` | | Calendar Platform public base URL; enable together with token and IDs |
-| `CALENDAR_PLATFORM_TOKEN` | | Read-only Calendar Platform native API bearer token |
+| `CALENDAR_PLATFORM_TOKEN` | | Calendar Platform <code>READ_ONLY_TOKEN</code> used only for cached events |
 | `CALENDAR_PLATFORM_IDS` | | Comma-separated canonical calendar IDs, in display colour order |
 | `CALENDAR_TIME_ZONE` | `Europe/Belgrade` | IANA timezone used to select a calendar day and display its times |
 | `WEATHER_LAT` | `44.82` | Latitude for Open-Meteo |

@@ -42,8 +42,6 @@ type Handler struct {
 	otaMu            sync.Mutex
 }
 
-const calendarPlatformRequestTimeout = 14 * time.Second
-
 func New(orch *fetcher.Orchestrator, apiKey, haBaseURL, haToken string, haLights, haClimates []string, haClient *http.Client) *Handler {
 	allowedLights := make(map[string]struct{}, len(haLights))
 	for _, id := range haLights {
@@ -362,7 +360,7 @@ type calendarPlatformEvent struct {
 }
 
 func (h *Handler) fetchCalendarPlatformEvents(r *http.Request, dayStart, dayEnd time.Time) ([]model.CalendarEvent, error) {
-	u, err := url.Parse(h.calendarPlatformBaseURL + "/api/native/v1/events")
+	u, err := url.Parse(h.calendarPlatformBaseURL + "/api/native/v1/cached-events")
 	if err != nil {
 		return nil, err
 	}
@@ -378,9 +376,7 @@ func (h *Handler) fetchCalendarPlatformEvents(r *http.Request, dayStart, dayEnd 
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+h.calendarPlatformToken)
-	calendarClient := *h.haClient
-	calendarClient.Timeout = calendarPlatformRequestTimeout
-	resp, err := calendarClient.Do(req)
+	resp, err := h.haClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
