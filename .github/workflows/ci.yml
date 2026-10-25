@@ -2,6 +2,13 @@ name: Build & Push
 
 on:
   push:
+    branches: [main, security/2026-10-25-remediation]
+    paths-ignore:
+      - "*.md"
+      - "docs/**"
+      - "LICENSE"
+      - ".gitignore"
+  pull_request:
     branches: [main]
     paths-ignore:
       - "*.md"
@@ -16,9 +23,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
-          go-version: "1.25"
+          go-version-file: go.mod
+      - run: go test ./...
+      - run: go vet ./...
       - run: go build ./...
 
   docker:
@@ -46,15 +55,16 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository_owner }}/esp32-bridge
+          flavor: latest=${{ github.ref == 'refs/heads/main' }}
           tags: |
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=sha,prefix=,format=short
 
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
+          push: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/security/2026-10-25-remediation')) || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') }}
           platforms: linux/amd64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

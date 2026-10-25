@@ -1,3 +1,3 @@
 module esp32-bridge
 
-go 1.24.3
+go 1.27.3
