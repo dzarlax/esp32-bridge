@@ -132,7 +132,7 @@ func (a *Auth) Register(mux *http.ServeMux) {
 }
 
 // Require protects a handler using the server-side admin session. Cloudflare
-// sessions also require a fresh, valid Access assertion on every request.
+// sessions also require a valid, unexpired Access application JWT on every request.
 func (a *Auth) Require(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		setNoStore(w)
@@ -254,7 +254,18 @@ func (a *Auth) handleCloudflareLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Cloudflare Access is not enabled", http.StatusNotFound)
 		return
 	}
-	login := a.teamDomain + "/cdn-cgi/access/login/" + url.PathEscape(a.baseURL.Hostname()) + "?redirect_url=" + url.QueryEscape(a.baseURL.String())
+	if email, ok := a.assertionEmail(r); ok {
+		record, token, created := a.newSession(Identity{Method: "cloudflare", Email: email})
+		if !created {
+			http.Error(w, "authentication unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		a.setSessionCookie(w, token, record.expires)
+		http.Redirect(w, r, "/settings/", http.StatusSeeOther)
+		return
+	}
+	callback := a.baseURL.Scheme + "://" + a.baseURL.Host + "/api/admin/v1/auth/cloudflare"
+	login := a.teamDomain + "/cdn-cgi/access/login/" + url.PathEscape(a.baseURL.Hostname()) + "?redirect_url=" + url.QueryEscape(callback)
 	http.Redirect(w, r, login, http.StatusFound)
 }
 

@@ -48,10 +48,30 @@ func (a *Auth) assertionEmail(r *http.Request) (string, bool) {
 		return "", false
 	}
 	values := r.Header.Values("Cf-Access-Jwt-Assertion")
-	if len(values) != 1 || len(values[0]) == 0 || len(values[0]) > 16*1024 {
+	token := ""
+	if len(values) > 0 {
+		if len(values) != 1 {
+			return "", false
+		}
+		token = values[0]
+	} else {
+		// Access protects only the login callback so standalone password login
+		// stays reachable. Its application JWT cookie covers subsequent API calls.
+		count := 0
+		for _, cookie := range r.Cookies() {
+			if cookie.Name == "CF_Authorization" {
+				token = cookie.Value
+				count++
+			}
+		}
+		if count != 1 {
+			return "", false
+		}
+	}
+	if len(token) == 0 || len(token) > 16*1024 {
 		return "", false
 	}
-	parts := strings.Split(values[0], ".")
+	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
 		return "", false
 	}

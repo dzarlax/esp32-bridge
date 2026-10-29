@@ -244,8 +244,13 @@ The panel supports either or both independent authentication methods:
   `https://…cloudflareaccess.com` URL), `ADMIN_CF_AUDIENCE`, and comma-separated
   `ADMIN_CF_EMAILS`. Bridge checks signature, issuer, audience, expiry and the
   email allowlist on the origin. A forged identity header is insufficient.
-  Protect the panel and `/api/admin/v1/*` at the proxy as appropriate; keep native
-  device endpoints independent. Password-only installations need no Cloudflare.
+  To keep password and Access login independent, protect only
+  `/api/admin/v1/auth/cloudflare` in Access and disable its Cookie Path Attribute.
+  Bridge validates the signed Access application JWT from the assertion header or
+  the HttpOnly `CF_Authorization` cookie on every Access session request. The
+  callback creates the admin session and returns to `/settings/`. Native device
+  endpoints keep their existing authentication. Password-only installations need
+  no Cloudflare.
 
 Set `ADMIN_BASE_URL` to the exact externally visible origin (HTTPS in production).
 `http://127.0.0.1:<port>` and other loopback origins are supported for local tests.

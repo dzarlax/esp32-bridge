@@ -29,7 +29,10 @@ POST /api/admin/v1/login {password}; POST /api/admin/v1/logout.
 GET /api/admin/v1/auth/cloudflare initiates configured Access login.
 Cookie credentials, exact Origin and X-CSRF-Token on unsafe methods. No device key
 in browser JS, URL, QR, logs or diagnostics. Neither auth method configured means
-closed panel. A Cloudflare session continues requiring a validated Access assertion.
+closed panel. A Cloudflare session continues requiring a valid, unexpired Access application JWT
+from the assertion header or CF_Authorization cookie on every request. Access may
+protect only the login callback with domain-scoped cookies to keep password login
+independent. A validated callback creates a session and redirects to /settings/.
 
 ## Shared connections
 

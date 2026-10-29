@@ -393,6 +393,46 @@ func TestCloudflareSessionRequiresAssertionOnEveryRequest(t *testing.T) {
 	if allowed.StatusCode != http.StatusNoContent {
 		t.Fatalf("valid assertion denied: %d", allowed.StatusCode)
 	}
+
+	// The callback establishes a session and returns to the actual panel.
+	callback := httptest.NewRequest(http.MethodGet, "/api/admin/v1/auth/cloudflare", nil)
+	callback.Header.Set("Cf-Access-Jwt-Assertion", token)
+	callbackReply := httptest.NewRecorder()
+	mux.ServeHTTP(callbackReply, callback)
+	if callbackReply.Code != http.StatusSeeOther || callbackReply.Header().Get("Location") != "/settings/" {
+		t.Fatal("callback did not return to settings")
+	}
+	// The signed application cookie authenticates API calls outside Access's
+	// callback path, but a forged or ambiguous token must never fall back.
+	for _, tc := range []struct {
+		name, value, header string
+		duplicate           bool
+		want                int
+	}{
+		{"application cookie", token, "", false, 204},
+		{"forged cookie", "forged", "", false, 401},
+		{"wrong audience cookie", signToken(t, private, kid, cfg.CloudflareTeamDomain, "other", "admin@example.test", time.Now().Add(time.Hour)), "", false, 401},
+		{"expired cookie", signToken(t, private, kid, cfg.CloudflareTeamDomain, "aud", "admin@example.test", time.Now().Add(-time.Hour)), "", false, 401},
+		{"invalid assertion overrides cookie", token, "forged", false, 401},
+		{"ambiguous cookie", token, "", true, 401},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/admin/v1/settings", nil)
+			req.AddCookie(cookie)
+			req.AddCookie(&http.Cookie{Name: "CF_Authorization", Value: tc.value})
+			if tc.header != "" {
+				req.Header.Set("Cf-Access-Jwt-Assertion", tc.header)
+			}
+			if tc.duplicate {
+				req.AddCookie(&http.Cookie{Name: "CF_Authorization", Value: token})
+			}
+			out := httptest.NewRecorder()
+			mux.ServeHTTP(out, req)
+			if out.Code != tc.want {
+				t.Fatalf("got %d want %d", out.Code, tc.want)
+			}
+		})
+	}
 }
 
 func postJSON(t *testing.T, c *http.Client, target, origin, body string, cookie *http.Cookie) *http.Response {
