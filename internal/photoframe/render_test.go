@@ -14,11 +14,13 @@ import (
 )
 
 func TestRenderRGB565AndBlackAlpha(t *testing.T) {
-	img := image.NewNRGBA(image.Rect(0, 0, 4, 1))
-	img.SetNRGBA(0, 0, color.NRGBA{255, 0, 0, 255})
-	img.SetNRGBA(1, 0, color.NRGBA{0, 255, 0, 255})
-	img.SetNRGBA(2, 0, color.NRGBA{0, 0, 255, 255})
-	img.SetNRGBA(3, 0, color.NRGBA{255, 255, 255, 0})
+	img := image.NewNRGBA(image.Rect(0, 0, Width, Height))
+	colors := []color.NRGBA{{255, 0, 0, 255}, {0, 255, 0, 255}, {0, 0, 255, 255}, {255, 255, 255, 0}}
+	for y := 0; y < Height; y++ {
+		for x := 0; x < Width; x++ {
+			img.SetNRGBA(x, y, colors[x/256])
+		}
+	}
 	var b bytes.Buffer
 	if err := png.Encode(&b, img); err != nil {
 		t.Fatal(err)
@@ -36,8 +38,8 @@ func TestRenderRGB565AndBlackAlpha(t *testing.T) {
 			t.Fatalf("pixel %d got %04x want %04x", x, got, want)
 		}
 	}
-	if data[0] != 0 {
-		t.Fatal("letterbox is not black")
+	if binary.LittleEndian.Uint16(data[:2]) != 0xf800 {
+		t.Fatal("matching-aspect photo edge was not preserved")
 	}
 }
 func TestOrientationCoordinates(t *testing.T) {
@@ -110,12 +112,7 @@ func TestJPEGExifOrientations(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				dw, dh := 1024, 512
-				if o >= 5 {
-					dw, dh = 300, 600
-				}
-				left, top := (Width-dw)/2, (Height-dh)/2
-				points := [][2]int{{left + dw/4, top + dh/4}, {left + 3*dw/4, top + dh/4}, {left + dw/4, top + 3*dh/4}, {left + 3*dw/4, top + 3*dh/4}}
+				points := [][2]int{{Width / 4, Height / 4}, {3 * Width / 4, Height / 4}, {Width / 4, 3 * Height / 4}, {3 * Width / 4, 3 * Height / 4}}
 				for i, p := range points {
 					v := binary.LittleEndian.Uint16(out[(p[1]*Width+p[0])*2:])
 					r, g, b := int(v>>11)*255/31, int((v>>5)&63)*255/63, int(v&31)*255/31
@@ -243,5 +240,36 @@ func TestPinnedDisplayP3ProfileAndConversion(t *testing.T) {
 		if diff := int(got) - want; diff < -3 || diff > 3 {
 			t.Fatalf("P3 channel %d = %d expected %d", i, got, want)
 		}
+	}
+}
+
+func TestRenderCoverCropsCenterAndFillsEveryPixel(t *testing.T) {
+	for _, size := range []image.Point{{40, 10}, {10, 40}, {20, 20}, {1, 10}, {10, 1}} {
+		t.Run(fmt.Sprintf("%dx%d", size.X, size.Y), func(t *testing.T) {
+			img := image.NewNRGBA(image.Rect(0, 0, size.X, size.Y))
+			for y := 0; y < size.Y; y++ {
+				for x := 0; x < size.X; x++ {
+					c := color.NRGBA{0, 255, 0, 255}
+					if size.X == 40 && (x < 10 || x >= 30) || size.Y == 40 && (y < 10 || y >= 30) || size.X == 20 && (y < 3 || y >= 17) {
+						c = color.NRGBA{255, 0, 255, 255}
+					}
+					img.SetNRGBA(x, y, c)
+				}
+			}
+			var b bytes.Buffer
+			png.Encode(&b, img)
+			data, err := Render(context.Background(), &b)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(data) != FrameBytes {
+				t.Fatal("wrong frame size")
+			}
+			for i := 0; i < len(data); i += 2 {
+				if v := binary.LittleEndian.Uint16(data[i : i+2]); v != 0x07e0 {
+					t.Fatalf("cropped photo left a border or lost center at pixel %d: %04x", i/2, v)
+				}
+			}
+		})
 	}
 }
