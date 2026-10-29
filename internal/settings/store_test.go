@@ -3,6 +3,7 @@ package settings
 import (
 	"encoding/json"
 	"errors"
+	"esp32-bridge/internal/config"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -519,4 +520,18 @@ func TestConcurrentBridgeIDReadsDuringSyncAndProfileReplacement(t *testing.T) {
 	}()
 	close(start)
 	wg.Wait()
+}
+
+func TestExistingLongCalendarIdentifiersRemainValid(t *testing.T) {
+	cfg := &config.Config{CalendarPlatformBaseURL: "https://calendar.example.test", CalendarPlatformIDs: []string{strings.Repeat("a", 134)}, CalendarTimeZone: "Europe/Belgrade", WeatherTZ: "Europe/Belgrade", NewsLimit: 5, NewsSinceHours: 24}
+	values := Defaults(cfg, "https://bridge.example.test")
+	if err := values.Validate(); err != nil {
+		t.Fatalf("existing calendar rejected: %v", err)
+	}
+	calendar := values.Services["calendar"]
+	calendar.IDs = []string{strings.Repeat("a", 513)}
+	values.Services["calendar"] = calendar
+	if err := values.Validate(); err == nil {
+		t.Fatal("unbounded calendar identifier accepted")
+	}
 }
