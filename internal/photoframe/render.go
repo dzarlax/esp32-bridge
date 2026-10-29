@@ -56,35 +56,7 @@ func Render(ctx context.Context, r io.Reader) ([]byte, error) {
 	if orient >= 5 {
 		ow, oh = sh, sw
 	}
-	// Sample the centered cover crop directly in oriented source coordinates.
-	// Rational pixel centers preserve aspect ratio even for one-pixel sources.
-	den, step := int64(2*Width), int64(2*ow)
-	originX := int64(ow)
-	originY := int64(oh)*Width - int64(ow)*Height + int64(ow)
-	if int64(ow)*Height >= int64(oh)*Width {
-		den, step = int64(2*Height), int64(2*oh)
-		originX = int64(ow)*Height - int64(oh)*Width + int64(oh)
-		originY = int64(oh)
-	}
-	out := make([]byte, FrameBytes)
-	for y := 0; y < Height; y++ {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		for x := 0; x < Width; x++ {
-			ox := int((originX + int64(x)*step) / den)
-			oy := int((originY + int64(y)*step) / den)
-			sx, sy := sourcePoint(orient, ox, oy, sw, sh)
-			rr, gg, bb, _ := img.At(img.Bounds().Min.X+sx, img.Bounds().Min.Y+sy).RGBA() // premultiplied alpha composites on black
-			if convertP3 {
-				rr, gg, bb = p3ToSRGB(rr, gg, bb)
-			}
-			v := uint16(rr>>11)<<11 | uint16(gg>>10)<<5 | uint16(bb>>11)
-			p := (y*Width + x) * 2
-			binary.LittleEndian.PutUint16(out[p:p+2], v)
-		}
-	}
-	return out, nil
+	return renderAdaptive(ctx, orientedPhoto{img: img, width: sw, height: sh, orientation: orient, p3: convertP3}, ow, oh)
 }
 
 func webPHasProfile(data []byte) bool {

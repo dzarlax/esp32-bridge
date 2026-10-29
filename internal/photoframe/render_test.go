@@ -112,7 +112,12 @@ func TestJPEGExifOrientations(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				points := [][2]int{{Width / 4, Height / 4}, {3 * Width / 4, Height / 4}, {Width / 4, 3 * Height / 4}, {3 * Width / 4, 3 * Height / 4}}
+				dw, dh := 1024, 512
+				if o >= 5 {
+					dw, dh = 300, 600
+				}
+				left, top := (Width-dw)/2, (Height-dh)/2
+				points := [][2]int{{left + dw/4, top + dh/4}, {left + 3*dw/4, top + dh/4}, {left + dw/4, top + 3*dh/4}, {left + 3*dw/4, top + 3*dh/4}}
 				for i, p := range points {
 					v := binary.LittleEndian.Uint16(out[(p[1]*Width+p[0])*2:])
 					r, g, b := int(v>>11)*255/31, int((v>>5)&63)*255/63, int(v&31)*255/31
@@ -256,9 +261,7 @@ func TestRenderCoverCropsCenterAndFillsEveryPixel(t *testing.T) {
 					img.SetNRGBA(x, y, c)
 				}
 			}
-			var b bytes.Buffer
-			png.Encode(&b, img)
-			data, err := Render(context.Background(), &b)
+			data, err := renderCover(context.Background(), orientedPhoto{img: img, width: size.X, height: size.Y, orientation: 1}, size.X, size.Y)
 			if err != nil {
 				t.Fatal(err)
 			}
