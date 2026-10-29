@@ -156,7 +156,9 @@ sRGB before RGB565 quantization. The fixture is for local integration testing on
 
 The authenticated `/api/photo-frame/v1/manifest` describes prepared frames;
 `/api/photo-frame/v1/frames/{id}` returns immutable 1024×600 RGB565 little-endian
-pixels. Rendering runs in a separate background worker, not in request handlers.
+pixels. Photos fill the screen using a centered cover crop after EXIF orientation;
+parts outside the display aspect ratio are cropped without stretching.
+Rendering runs in a separate background worker, not in request handlers.
 
 
 ### Immich album source

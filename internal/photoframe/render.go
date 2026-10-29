@@ -56,33 +56,31 @@ func Render(ctx context.Context, r io.Reader) ([]byte, error) {
 	if orient >= 5 {
 		ow, oh = sh, sw
 	}
-	dw, dh := Width, Height
-	if int64(Width)*int64(oh) <= int64(Height)*int64(ow) {
-		dh = int(int64(Width) * int64(oh) / int64(ow))
-	} else {
-		dw = int(int64(Height) * int64(ow) / int64(oh))
-	}
-	if dw < 1 {
-		dw = 1
-	}
-	if dh < 1 {
-		dh = 1
+	// Sample the centered cover crop directly in oriented source coordinates.
+	// Rational pixel centers preserve aspect ratio even for one-pixel sources.
+	den, step := int64(2*Width), int64(2*ow)
+	originX := int64(ow)
+	originY := int64(oh)*Width - int64(ow)*Height + int64(ow)
+	if int64(ow)*Height >= int64(oh)*Width {
+		den, step = int64(2*Height), int64(2*oh)
+		originX = int64(ow)*Height - int64(oh)*Width + int64(oh)
+		originY = int64(oh)
 	}
 	out := make([]byte, FrameBytes)
-	left, top := (Width-dw)/2, (Height-dh)/2
-	for y := 0; y < dh; y++ {
+	for y := 0; y < Height; y++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		for x := 0; x < dw; x++ {
-			ox, oy := x*ow/dw, y*oh/dh
+		for x := 0; x < Width; x++ {
+			ox := int((originX + int64(x)*step) / den)
+			oy := int((originY + int64(y)*step) / den)
 			sx, sy := sourcePoint(orient, ox, oy, sw, sh)
 			rr, gg, bb, _ := img.At(img.Bounds().Min.X+sx, img.Bounds().Min.Y+sy).RGBA() // premultiplied alpha composites on black
 			if convertP3 {
 				rr, gg, bb = p3ToSRGB(rr, gg, bb)
 			}
 			v := uint16(rr>>11)<<11 | uint16(gg>>10)<<5 | uint16(bb>>11)
-			p := ((top+y)*Width + left + x) * 2
+			p := (y*Width + x) * 2
 			binary.LittleEndian.PutUint16(out[p:p+2], v)
 		}
 	}
