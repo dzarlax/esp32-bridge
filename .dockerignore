@@ -1,0 +1,13 @@
+.git
+.env
+.env.*
+!.env.example
+web/node_modules
+web/dist
+**/*.tsbuildinfo
+server
+data
+.secrets
+secrets
+docs
+*.log

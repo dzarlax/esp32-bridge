@@ -1,0 +1,232 @@
+import type {
+  Command,
+  ConnectionsEnvelope,
+  DeviceList,
+  Envelope,
+  Session,
+  Settings,
+  SharedConnections,
+  UpdateInfo,
+} from "./types";
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly body?: unknown,
+  ) {
+    super(message);
+  }
+}
+
+async function decode<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    let body: unknown;
+    const contentType = response.headers.get("Content-Type") ?? "";
+    const raw = await response.text().catch(() => "");
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      body = undefined;
+    }
+    const record =
+      body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+    const safeText =
+      contentType.toLowerCase().includes("text/plain") &&
+      /^[A-Za-z0-9 _.-]{1,100}$/.test(raw.trim())
+        ? raw.trim()
+        : "";
+    throw new ApiError(
+      typeof record.error === "string"
+        ? record.error
+        : safeText || `Request failed (${response.status})`,
+      response.status,
+      body,
+    );
+  }
+  return response.status === 204
+    ? (undefined as T)
+    : (response.json() as Promise<T>);
+}
+
+export class AdminApi {
+  private csrf?: string;
+  setCsrf(token?: string) {
+    this.csrf = token;
+  }
+  private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const method = (init.method ?? "GET").toUpperCase();
+    const headers = new Headers(init.headers);
+    if (init.body && !headers.has("Content-Type"))
+      headers.set("Content-Type", "application/json");
+    if (!["GET", "HEAD", "OPTIONS"].includes(method) && this.csrf)
+      headers.set("X-CSRF-Token", this.csrf);
+    const response = await fetch(path, {
+      ...init,
+      method,
+      headers,
+      credentials: "same-origin",
+      cache: "no-store",
+    });
+    if (response.status === 401 && path !== "/api/admin/v1/session")
+      window.dispatchEvent(new CustomEvent("admin-auth-expired"));
+    return decode<T>(response);
+  }
+  session() {
+    return this.request<Session>("/api/admin/v1/session");
+  }
+  async login(password: string) {
+    const value = await this.request<Session>("/api/admin/v1/login", {
+      method: "POST",
+      body: JSON.stringify({ password }),
+    });
+    this.setCsrf(value.csrf_token);
+    return value;
+  }
+  async logout() {
+    return this.request<void>("/api/admin/v1/logout", {
+      method: "POST",
+      body: "{}",
+    });
+  }
+  devices() {
+    return this.request<DeviceList>("/api/admin/v1/devices");
+  }
+  async settings(deviceId: string) {
+    const result = normalizeEnvelope(
+      await this.request<Envelope>(this.devicePath(deviceId, "settings")),
+    );
+    if (result.device_id !== deviceId) {
+      throw new ApiError("Device response did not match the selected display", 502);
+    }
+    return result;
+  }
+  async save(
+    deviceId: string,
+    settings: Settings,
+    revision: number,
+    network_credentials?: Record<string, string>,
+  ) {
+    const body: Record<string, unknown> = { settings };
+    if (network_credentials && Object.keys(network_credentials).length)
+      body.network_credentials = network_credentials;
+    const result = await this.request<Envelope>(
+      this.devicePath(deviceId, "settings"),
+      {
+      method: "PATCH",
+      headers: { "If-Match": `"${revision}"` },
+      body: JSON.stringify(body),
+      },
+    );
+    if (result.device_id !== deviceId) {
+      throw new ApiError("Device response did not match the selected display", 502);
+    }
+    return normalizeEnvelope(result);
+  }
+  connections() {
+    return this.request<ConnectionsEnvelope>("/api/admin/v1/connections");
+  }
+  saveConnections(
+    connections: SharedConnections,
+    revision: number,
+    secrets?: Record<string, string | null>,
+    confirmDisconnect = false,
+  ) {
+    const body: Record<string, unknown> = { connections };
+    if (secrets && Object.keys(secrets).length) body.secrets = secrets;
+    if (confirmDisconnect) body.confirm_disconnect = true;
+    return this.request<ConnectionsEnvelope>("/api/admin/v1/connections", {
+      method: "PATCH",
+      headers: { "If-Match": `"${revision}"` },
+      body: JSON.stringify(body),
+    });
+  }
+  updates(deviceId: string) {
+    return this.request<UpdateInfo>(this.devicePath(deviceId, "updates"));
+  }
+  action(
+    deviceId: string,
+    action: "photo_start" | "restart" | "ota_check" | "ota_install" | "reset",
+  ) {
+    const confirm = ["restart", "ota_install", "reset"].includes(action)
+      ? true
+      : undefined;
+    return this.request<{ command: Command }>(this.devicePath(deviceId, "actions"), {
+      method: "POST",
+      body: JSON.stringify({ action, ...(confirm ? { confirm } : {}) }),
+    });
+  }
+  async diagnostics(deviceId: string) {
+    const path = this.devicePath(deviceId, "diagnostics");
+    const response = await fetch(path, {
+      credentials: "same-origin",
+      cache: "no-store",
+    });
+    if (response.status === 401)
+      window.dispatchEvent(new CustomEvent("admin-auth-expired"));
+    if (!response.ok) return decode<never>(response);
+    const requestedFilename = response.headers
+      .get("Content-Disposition")
+      ?.match(/filename="?([^";]+)"?/)?.[1];
+    const filename = requestedFilename
+      ?.replaceAll(/[^a-zA-Z0-9._-]/g, "_")
+      .slice(0, 100);
+    return {
+      blob: await response.blob(),
+      filename: filename || "display-diagnostics.json",
+    };
+  }
+  private devicePath(deviceId: string, suffix: string) {
+    if (!/^[a-f0-9]{32}$/.test(deviceId)) {
+      throw new ApiError("Invalid display identifier", 400);
+    }
+    return `/api/admin/v1/devices/${deviceId}/${suffix}`;
+  }
+}
+
+export function isRevisionConflict(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    error.status === 409 &&
+    !!error.body &&
+    typeof error.body === "object" &&
+    (error.body as Record<string, unknown>).error === "revision_conflict"
+  );
+}
+
+function normalizeEnvelope(envelope: Envelope): Envelope {
+  const services = envelope.settings.services;
+  return {
+    ...envelope,
+    settings: {
+      ...envelope.settings,
+      services: {
+        ...services,
+        calendar: {
+          ...services.calendar,
+          ids: Array.isArray(services.calendar?.ids)
+            ? services.calendar.ids
+            : [],
+        },
+        transport: {
+          ...services.transport,
+          ids: Array.isArray(services.transport?.ids)
+            ? services.transport.ids
+            : [],
+        },
+        home: {
+          ...services.home,
+          sensors: Array.isArray(services.home?.sensors)
+            ? services.home.sensors
+            : [],
+          lights: Array.isArray(services.home?.lights)
+            ? services.home.lights
+            : [],
+          climates: Array.isArray(services.home?.climates)
+            ? services.home.climates
+            : [],
+        },
+      },
+    },
+  };
+}

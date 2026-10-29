@@ -6,6 +6,9 @@ services:
     env_file: .env
     environment:
       LISTEN_ADDR: ":8090"
+      ADMIN_STATE_DIR: "/data/homedash"
+    volumes:
+      - ./data:/data
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.esp32-bridge.entrypoints=https"

@@ -1,113 +1,79 @@
 package main
 
 import (
-	"context"
 	"log"
 	"net/http"
+	"os"
+	"strconv"
+	"strings"
 	"time"
-	_ "time/tzdata" // Include IANA zones in the minimal production container.
+	_ "time/tzdata"
 
-	"esp32-bridge/internal/cache"
+	"esp32-bridge/internal/adminauth"
+	"esp32-bridge/internal/app"
 	"esp32-bridge/internal/config"
-	"esp32-bridge/internal/fetcher"
-	"esp32-bridge/internal/handler"
-	"esp32-bridge/internal/photoframe"
+	"esp32-bridge/internal/management"
+	"esp32-bridge/internal/settings"
+	webui "esp32-bridge/web"
 )
 
 func main() {
 	cfg := config.Load()
-	if err := cfg.Validate(); err != nil {
-		log.Fatal(err)
+	if e := cfg.Validate(); e != nil {
+		log.Fatal(e)
 	}
-
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-		Transport: &http.Transport{
-			MaxIdleConns:        20,
-			MaxIdleConnsPerHost: 5,
-			IdleConnTimeout:     90 * time.Second,
-		},
+	client := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{MaxIdleConns: 20, MaxIdleConnsPerHost: 5, IdleConnTimeout: 90 * time.Second}}
+	runtime, e := app.NewFleet(cfg, client)
+	if e != nil {
+		log.Fatal(e)
 	}
-
-	c := cache.New()
-	var fetchers []fetcher.Fetcher
-
-	if cfg.HealthBaseURL != "" {
-		fetchers = append(fetchers, fetcher.NewHealth(cfg.HealthBaseURL, cfg.HealthAPIKey, client, cfg.HealthCacheTTL))
-		log.Printf("Health fetcher: %s", cfg.HealthBaseURL)
-	}
-	if cfg.TodoistToken != "" {
-		fetchers = append(fetchers, fetcher.NewTodoist(cfg.TodoistToken, client, cfg.TodoistCacheTTL))
-		log.Printf("Todoist fetcher: enabled")
-	}
-	if cfg.NewsBaseURL != "" {
-		fetchers = append(fetchers, fetcher.NewNews(cfg.NewsBaseURL, cfg.NewsLimit, cfg.NewsSinceHours, client, cfg.NewsCacheTTL))
-		log.Printf("News fetcher: %s", cfg.NewsBaseURL)
-	}
-	if cfg.HABaseURL != "" && len(cfg.HASensors) > 0 {
-		fetchers = append(fetchers, fetcher.NewHA(cfg.HABaseURL, cfg.HAToken, cfg.HASensors, client, cfg.HACacheTTL))
-		log.Printf("HA sensors: %s (%d sensors)", cfg.HABaseURL, len(cfg.HASensors))
-	}
-	if cfg.HABaseURL != "" && len(cfg.HALights) > 0 {
-		fetchers = append(fetchers, fetcher.NewLights(cfg.HABaseURL, cfg.HAToken, cfg.HALights, client, cfg.HACacheTTL))
-		log.Printf("HA lights: %s (%d lights)", cfg.HABaseURL, len(cfg.HALights))
-	}
-	if cfg.HABaseURL != "" && len(cfg.HAClimates) > 0 {
-		fetchers = append(fetchers, fetcher.NewClimate(cfg.HABaseURL, cfg.HAToken, cfg.HAClimates, client, cfg.HACacheTTL))
-		log.Printf("HA climate: %s (%d entities)", cfg.HABaseURL, len(cfg.HAClimates))
-	}
-	if cfg.WeatherLat != "" {
-		fetchers = append(fetchers, fetcher.NewWeather(cfg.WeatherLat, cfg.WeatherLon, cfg.WeatherTZ, client, cfg.WeatherCacheTTL))
-		log.Printf("Weather fetcher: lat=%s lon=%s", cfg.WeatherLat, cfg.WeatherLon)
-	}
-	if cfg.TransportBaseURL != "" && len(cfg.TransportStops) > 0 {
-		fetchers = append(fetchers, fetcher.NewTransport(cfg.TransportBaseURL, cfg.TransportStops, client, cfg.TransportCacheTTL))
-		log.Printf("Transport fetcher: %s (%d stops)", cfg.TransportBaseURL, len(cfg.TransportStops))
-	}
-
-	if len(fetchers) == 0 {
-		log.Println("Warning: no fetchers configured")
-	}
-
-	orch := fetcher.NewOrchestrator(fetchers, c, cfg.FetchTimeout)
-	h := handler.New(orch, cfg.APIKey, cfg.HABaseURL, cfg.HAToken, cfg.HALights, cfg.HAClimates, client)
-	h.SetCalendarPlatform(cfg.CalendarPlatformBaseURL, cfg.CalendarPlatformToken, cfg.CalendarPlatformIDs, cfg.CalendarTimeZone)
-	h.SetOTA(cfg.OTAGitHubRepo, cfg.OTAGitHubToken, cfg.MigrateBridgeURL)
-	var photoSource photoframe.Source
-	if cfg.PhotoEnabled && cfg.PhotoSource == "fixture" {
-		photoSource = photoframe.FixtureSource{}
-	}
-	if cfg.PhotoEnabled && cfg.PhotoSource == "immich" {
-		key, err := cfg.ReadImmichKey()
-		if err != nil {
-			log.Fatal(err)
-		}
-		photoSource, err = photoframe.NewImmich(cfg.ImmichBaseURL, cfg.ImmichAlbumID, key, client)
-		if err != nil {
-			log.Fatal("cannot initialize Immich photo source")
-		}
-	}
-	photos := photoframe.New(cfg.PhotoEnabled, photoSource, cfg.PhotoIdle, cfg.PhotoInterval, cfg.PhotoStale, cfg.PhotoCache)
-	h.SetPhotoFrame(photos)
-	go photos.Run(context.Background())
-
-	if cfg.OTAGitHubRepo != "" {
-		log.Printf("OTA: repo %s", cfg.OTAGitHubRepo)
-	}
-	if cfg.CalendarPlatformBaseURL != "" {
-		log.Printf("Calendar Platform: %s (%d calendars)", cfg.CalendarPlatformBaseURL, len(cfg.CalendarPlatformIDs))
-	}
-
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/photo-frame/v1/manifest", h.PhotoManifest)
-	mux.HandleFunc("/api/photo-frame/v1/frames/", h.PhotoFrame)
-	mux.HandleFunc("/api/dashboard", h.Dashboard)
-	mux.HandleFunc("/api/ha/action", h.HAAction)
-	mux.HandleFunc("/api/calendar", h.Calendar)
-	mux.HandleFunc("/api/ota/check", h.OTACheck)
-	mux.HandleFunc("/api/ota/firmware", h.OTAFirmware)
-	mux.HandleFunc("/health", h.Health)
-
-	log.Printf("esp32-bridge listening on %s (%d fetchers)", cfg.ListenAddr, len(fetchers))
-	log.Fatal(http.ListenAndServe(cfg.ListenAddr, mux))
+	enabled, e := strconv.ParseBool(env("ADMIN_ENABLED", "false"))
+	if e != nil {
+		log.Fatal("invalid ADMIN_ENABLED")
+	}
+	if enabled {
+		base := os.Getenv("ADMIN_BASE_URL")
+		auth, e := adminauth.New(adminauth.Config{BaseURL: base, PasswordHashFile: os.Getenv("ADMIN_PASSWORD_HASH_FILE"), CloudflareTeamDomain: os.Getenv("ADMIN_CF_TEAM_DOMAIN"), CloudflareAudience: os.Getenv("ADMIN_CF_AUDIENCE"), CloudflareEmails: split(os.Getenv("ADMIN_CF_EMAILS"))}, client)
+		if e != nil {
+			log.Fatal(e)
+		}
+		store, e := settings.New(env("ADMIN_STATE_DIR", "/data/homedash"), settings.Defaults(cfg, base), app.DefaultSecrets(cfg), base, runtime.Prepare)
+		if e != nil {
+			log.Fatal(e)
+		}
+		values, secrets := store.Snapshot()
+		commit, abort, e := runtime.Prepare(values, secrets)
+		if e != nil {
+			log.Fatal(e)
+		}
+		_ = abort
+		commit()
+		runtime.EnableManaged()
+		auth.Register(mux)
+		api := &management.API{Store: store, DeviceKey: cfg.APIKey, Statuses: runtime.Statuses, Updates: runtime.Updates}
+		api.Register(mux, auth.Require)
+		mux.Handle("/settings/", webui.Handler())
+		mux.HandleFunc("/settings", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/settings/", http.StatusSeeOther) })
+		log.Print("Administration panel enabled")
+	}
+	mux.Handle("/", runtime)
+	server := &http.Server{Addr: cfg.ListenAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
+	log.Printf("esp32-bridge listening on %s", cfg.ListenAddr)
+	log.Fatal(server.ListenAndServe())
+}
+func env(name, fallback string) string {
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	return fallback
+}
+func split(v string) []string {
+	var out []string
+	for _, p := range strings.Split(v, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
