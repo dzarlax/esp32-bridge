@@ -149,10 +149,51 @@ as unavailable; it does not read local image files. Optional settings are
 `PHOTO_FRAME_IDLE_SECONDS` (30–3600, default 300),
 `PHOTO_FRAME_INTERVAL_SECONDS` (15–3600, default 60),
 `PHOTO_FRAME_MAX_STALE_SECONDS` (60–3600, default 900), and
-`PHOTO_FRAME_CACHE_FRAMES` (16–32, default 32). JPEG and PNG source images are
-bounded to 20 MiB and 24 megapixels; images with embedded color profiles are
-not currently supported. The fixture is for local integration testing only.
+`PHOTO_FRAME_CACHE_FRAMES` (16–32, default 32). JPEG, PNG and WebP source images are
+bounded to 20 MiB and 24 megapixels; unknown embedded color profiles are rejected. The exact standard libvips
+sRGB and Display P3 JPEG profiles are recognized; P3 pixels are converted to
+sRGB before RGB565 quantization. The fixture is for local integration testing only.
 
 The authenticated `/api/photo-frame/v1/manifest` describes prepared frames;
 `/api/photo-frame/v1/frames/{id}` returns immutable 1024×600 RGB565 little-endian
 pixels. Rendering runs in a separate background worker, not in request handlers.
+
+
+### Immich album source
+
+Set `PHOTO_FRAME_SOURCE=immich` with `PHOTO_FRAME_ENABLED=true` and configure:
+
+```env
+IMMICH_BASE_URL=https://photos.example.com
+IMMICH_ALBUM_ID=your-album-uuid
+IMMICH_API_KEY_FILE=/run/secrets/immich-api-key
+```
+
+Mount the key as a read-only private regular file (mode 0400 or 0600, readable
+by the Bridge process). Do not put the key in Git, the display, command-line
+arguments or logs. Only the selected album is queried. This is an application
+restriction: a user's Immich API key may still have access to other albums.
+Use a dedicated key with only the read permissions needed for the album,
+metadata search and preview access. Verify these permissions on the installed
+Immich version before deployment; do not grant write/delete or original-download
+permissions for the photo frame.
+
+The adapter targets Immich 3.3.5: it verifies the album, searches its images
+using `filter.albumIds.any` and cursor pagination, and fetches edited previews
+when available. It rejects redirects, missing configuration, unexpected schemas,
+cyclic pagination and albums exceeding 5000 entries. It does not fall back to
+the whole library or original media. Preview bodies are limited to 20 MiB and
+24 megapixels; JSON pages are limited to 4 MiB. Only the pinned libvips sRGB/Display P3 JPEG profiles are supported; all other
+embedded profiles remain rejected. Test real preview formats before switching from the fixture.
+
+Removing an asset or changing its revision revokes its old cached frame ID
+after the next successful source refresh. Authorization denial clears the
+cache immediately for new requests. In-flight transfers finish from their
+borrowed bytes. A transient source failure permits existing cached frames only
+within `PHOTO_FRAME_MAX_STALE_SECONDS` of the last successful listing; requests
+do not extend that period. A frame already displayed may remain until the
+display receives the next manifest or reaches its stale deadline.
+
+Keep `PHOTO_FRAME_SOURCE=fixture` until album access, preview rendering, service
+health and the physical display have been accepted. Rollback uses the previous
+pinned image/configuration and fixture source; no Immich media is modified.

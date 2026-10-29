@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -47,20 +48,21 @@ type cached struct {
 	pins      int
 }
 type Service struct {
-	mu         sync.RWMutex
-	manifest   Manifest
-	cache      map[string]*cached
-	limit      int
-	source     Source
-	enabled    bool
-	transfers  chan struct{}
-	byAsset    map[string]string
-	cycle      []Asset
-	pos        int
-	signature  string
-	window     []string
-	smallSteps int
-	shuffle    func(int, func(int, int))
+	mu                sync.RWMutex
+	manifest          Manifest
+	cache             map[string]*cached
+	limit             int
+	source            Source
+	enabled           bool
+	transfers         chan struct{}
+	byAsset           map[string]string
+	lastSourceSuccess time.Time
+	cycle             []Asset
+	pos               int
+	signature         string
+	window            []string
+	smallSteps        int
+	shuffle           func(int, func(int, int))
 }
 
 func New(enabled bool, source Source, idle, interval, stale, limit int) *Service {
@@ -103,7 +105,7 @@ func (s *Service) Release() { <-s.transfers }
 func (s *Service) Borrow(id string) ([]byte, func(), bool) {
 	s.mu.Lock()
 	v, ok := s.cache[id]
-	if !ok {
+	if !ok || s.lastSourceSuccess.IsZero() || time.Since(s.lastSourceSuccess) >= time.Duration(s.manifest.Stale)*time.Second {
 		s.mu.Unlock()
 		return nil, nil, false
 	}
@@ -136,10 +138,18 @@ func (s *Service) refresh(parent context.Context) {
 	defer cancel()
 	assets, err := s.source.List(ctx)
 	if err != nil {
+		if errors.Is(err, ErrAccessDenied) {
+			s.revokeSource()
+			return
+		}
 		s.setState("unavailable")
 		return
 	}
+	s.pruneSource(assets)
 	if len(assets) == 0 {
+		s.signature = ""
+		s.window = nil
+		s.cycle = nil
 		s.setState("empty")
 		return
 	}
@@ -235,6 +245,10 @@ func (s *Service) refresh(parent context.Context) {
 			}
 			r, e := s.source.Open(ctx, a)
 			if e != nil {
+				if errors.Is(e, ErrAccessDenied) {
+					s.revokeSource()
+					return
+				}
 				s.pos++
 				continue
 			}
@@ -282,6 +296,50 @@ func (s *Service) refresh(parent context.Context) {
 	}
 	s.manifest.Frames = frames
 	s.manifest.State = "ready"
+}
+
+// Existing transfers own their borrowed byte slice. Removing the cache entry
+// revokes new requests without invalidating those slices or their release hook.
+func (s *Service) pruneSource(assets []Asset) {
+	allowed := make(map[string]bool, len(assets))
+	for _, a := range assets {
+		allowed[assetKey(a)] = true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastSourceSuccess = time.Now()
+	retained := make(map[string]bool)
+	for key, id := range s.byAsset {
+		if !allowed[key] {
+			delete(s.byAsset, key)
+		} else {
+			retained[id] = true
+		}
+	}
+	for id := range s.cache {
+		if !retained[id] {
+			delete(s.cache, id)
+		}
+	}
+	frames := s.manifest.Frames[:0]
+	for _, f := range s.manifest.Frames {
+		if retained[f.ID] {
+			frames = append(frames, f)
+		}
+	}
+	s.manifest.Frames = frames
+}
+
+func (s *Service) revokeSource() {
+	s.mu.Lock()
+	s.cache = map[string]*cached{}
+	s.byAsset = map[string]string{}
+	s.lastSourceSuccess = time.Time{}
+	s.manifest.State = "unavailable"
+	s.manifest.Frames = []Frame{}
+	s.mu.Unlock()
+	s.signature = ""
+	s.window = nil
 }
 func frameContains(fs []Frame, id string) bool {
 	for _, f := range fs {
