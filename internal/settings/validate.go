@@ -35,13 +35,14 @@ func validURL(v string) bool {
 	u, e := url.Parse(v)
 	return e == nil && cleanText(v, 512) && (u.Scheme == "https" || u.Scheme == "http") && u.Hostname() != "" && u.User == nil && u.RawQuery == "" && u.Fragment == ""
 }
-func validIDs(ids []string, max int) bool {
+func validIDs(ids []string, max int) bool { return validIDsWithLength(ids, max, 128) }
+func validIDsWithLength(ids []string, max, maxLength int) bool {
 	if len(ids) > max {
 		return false
 	}
 	seen := map[string]bool{}
 	for _, id := range ids {
-		if strings.TrimSpace(id) == "" || !cleanText(id, 128) || seen[id] {
+		if strings.TrimSpace(id) == "" || !cleanText(id, maxLength) || seen[id] {
 			return false
 		}
 		seen[id] = true
@@ -95,7 +96,11 @@ func (v Values) Validate() error {
 	}
 	for _, name := range serviceNames {
 		s, ok := v.Services[name]
-		if !ok || !validURL(s.BaseURL) || !validIDs(s.IDs, 32) || !validIDs(s.Sensors, 10) || !validIDs(s.Lights, 8) || !validIDs(s.Climates, 1) {
+		idLength := 128
+		if name == "calendar" {
+			idLength = 512
+		}
+		if !ok || !validURL(s.BaseURL) || !validIDsWithLength(s.IDs, 32, idLength) || !validIDs(s.Sensors, 10) || !validIDs(s.Lights, 8) || !validIDs(s.Climates, 1) {
 			return fmt.Errorf("invalid %s settings", name)
 		}
 		if len(s.Timezone) > 64 || !cleanText(s.Timezone, 64) {
