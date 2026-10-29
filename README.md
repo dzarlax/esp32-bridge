@@ -156,8 +156,11 @@ sRGB before RGB565 quantization. The fixture is for local integration testing on
 
 The authenticated `/api/photo-frame/v1/manifest` describes prepared frames;
 `/api/photo-frame/v1/frames/{id}` returns immutable 1024×600 RGB565 little-endian
-pixels. Photos fill the screen using a centered cover crop after EXIF orientation;
-parts outside the display aspect ratio are cropped without stretching.
+pixels. After EXIF orientation, photos use a centered cover crop when it removes
+at most 10% of their area. Otherwise, the complete sharp photo is centered over
+a blurred, dimmed cover copy of itself. Each frame contains one photo, without
+stretching. Background blur runs at 128×75 before smooth enlargement; foreground
+colors and sharpness are preserved.
 Rendering runs in a separate background worker, not in request handlers.
 
 
