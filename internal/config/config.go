@@ -2,10 +2,13 @@ package config
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"esp32-bridge/internal/photoframe"
 )
 
 type Config struct {
@@ -51,6 +54,7 @@ type Config struct {
 
 	PhotoEnabled                                     bool
 	PhotoSource                                      string
+	ImmichBaseURL, ImmichAlbumID, ImmichAPIKeyFile   string
 	PhotoIdle, PhotoInterval, PhotoStale, PhotoCache int
 	photoErr                                         error
 
@@ -68,6 +72,7 @@ func Load() *Config {
 		photoErr = fmt.Errorf("invalid photo frame configuration")
 	}
 	return &Config{
+		ImmichBaseURL: envStr("IMMICH_BASE_URL", ""), ImmichAlbumID: envStr("IMMICH_ALBUM_ID", ""), ImmichAPIKeyFile: envStr("IMMICH_API_KEY_FILE", ""),
 		PhotoEnabled: enabled, PhotoSource: envStr("PHOTO_FRAME_SOURCE", "none"), PhotoIdle: idle, PhotoInterval: interval, PhotoStale: stale, PhotoCache: cache, photoErr: photoErr,
 		ListenAddr: envStr("LISTEN_ADDR", ":8090"),
 		APIKey:     envStr("API_KEY", ""),
@@ -117,8 +122,16 @@ func (c *Config) Validate() error {
 	if c.photoErr != nil {
 		return c.photoErr
 	}
-	if c.PhotoEnabled && ((c.PhotoSource != "none" && c.PhotoSource != "fixture") || c.PhotoIdle < 30 || c.PhotoIdle > 3600 || c.PhotoInterval < 15 || c.PhotoInterval > 3600 || c.PhotoStale < 60 || c.PhotoStale > 3600 || c.PhotoCache < 16 || c.PhotoCache > 32) {
+	if c.PhotoEnabled && ((c.PhotoSource != "none" && c.PhotoSource != "fixture" && c.PhotoSource != "immich") || c.PhotoIdle < 30 || c.PhotoIdle > 3600 || c.PhotoInterval < 15 || c.PhotoInterval > 3600 || c.PhotoStale < 60 || c.PhotoStale > 3600 || c.PhotoCache < 16 || c.PhotoCache > 32) {
 		return fmt.Errorf("invalid photo frame configuration")
+	}
+	if c.PhotoEnabled && c.PhotoSource == "immich" {
+		if err := photoframe.ValidateImmichEndpoint(c.ImmichBaseURL, c.ImmichAlbumID); err != nil {
+			return fmt.Errorf("invalid Immich endpoint or album ID")
+		}
+		if _, err := c.ReadImmichKey(); err != nil {
+			return err
+		}
 	}
 	if c.APIKey == "" {
 		return fmt.Errorf("API_KEY is required")
@@ -140,6 +153,33 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("CALENDAR_TIME_ZONE must be a valid IANA time zone: %w", err)
 	}
 	return nil
+}
+
+// ReadImmichKey reads a bounded secret without including its value or path in errors.
+func (c *Config) ReadImmichKey() (string, error) {
+	f, err := os.Open(c.ImmichAPIKeyFile)
+	if err != nil {
+		return "", fmt.Errorf("cannot read IMMICH_API_KEY_FILE")
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+		return "", fmt.Errorf("IMMICH_API_KEY_FILE must be a private regular file")
+	}
+	data, err := io.ReadAll(io.LimitReader(f, 4097))
+	if err != nil || len(data) > 4096 {
+		return "", fmt.Errorf("invalid IMMICH_API_KEY_FILE")
+	}
+	key := strings.TrimSpace(string(data))
+	if key == "" || strings.ContainsAny(key, "\r\n\x00") {
+		return "", fmt.Errorf("invalid Immich API key")
+	}
+	for _, ch := range key {
+		if ch < 0x21 || ch > 0x7e {
+			return "", fmt.Errorf("invalid Immich API key")
+		}
+	}
+	return key, nil
 }
 
 func envStr(key, def string) string {

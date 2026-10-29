@@ -1,6 +1,11 @@
 package config
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestValidateCalendarPlatformRequiresCompleteConfiguration(t *testing.T) {
 	for _, cfg := range []*Config{
@@ -52,5 +57,56 @@ func TestDisabledPhotoFrameIgnoresSourceSettings(t *testing.T) {
 	t.Setenv("PHOTO_FRAME_CACHE_FRAMES", "invalid")
 	if err := Load().Validate(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestImmichConfiguration(t *testing.T) {
+	t.Setenv("API_KEY", "bridge-test")
+	t.Setenv("PHOTO_FRAME_ENABLED", "true")
+	t.Setenv("PHOTO_FRAME_SOURCE", "immich")
+	t.Setenv("IMMICH_BASE_URL", "https://photos.example.test")
+	t.Setenv("IMMICH_ALBUM_ID", "12345678-1234-4567-8123-123456789abc")
+	path := filepath.Join(t.TempDir(), "key")
+	if err := os.WriteFile(path, []byte("test-key\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("IMMICH_API_KEY_FILE", path)
+	if err := Load().Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ name, value string }{
+		{"IMMICH_BASE_URL", "http://photos.example.test"},
+		{"IMMICH_BASE_URL", "https://user:secret@photos.example.test"},
+		{"IMMICH_BASE_URL", "https://photos.example.test?key=secret"},
+		{"IMMICH_ALBUM_ID", "not-an-album"},
+		{"IMMICH_API_KEY_FILE", path + "missing"},
+	} {
+		t.Run(tc.name+tc.value, func(t *testing.T) {
+			t.Setenv(tc.name, tc.value)
+			if err := Load().Validate(); err == nil {
+				t.Fatal("accepted invalid Immich config")
+			}
+		})
+	}
+	for _, data := range []string{"", "test\nheader", strings.Repeat("x", 4097)} {
+		if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := Load().Validate(); err == nil {
+			t.Fatal("accepted invalid secret file")
+		}
+	}
+	if err := os.WriteFile(path, []byte("secret"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Load().Validate(); err == nil {
+		t.Fatal("accepted public secret file")
+	}
+	t.Setenv("PHOTO_FRAME_ENABLED", "false")
+	if err := Load().Validate(); err != nil {
+		t.Fatal("disabled source requires key", err)
 	}
 }

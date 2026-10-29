@@ -9,6 +9,7 @@ import (
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"os"
 	"testing"
 )
 
@@ -132,4 +133,115 @@ func abs(v int) int {
 		return -v
 	}
 	return v
+}
+
+func TestRenderWebPAndRejectProfile(t *testing.T) {
+	data, err := os.ReadFile("testdata/solid-red.webp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pixels, err := Render(context.Background(), bytes.NewReader(data))
+	if err != nil || len(pixels) != FrameBytes {
+		t.Fatalf("WebP render: %v", err)
+	}
+	if got := binary.LittleEndian.Uint16(pixels[((Height/2)*Width+Width/2)*2:]); got != 0xf800 {
+		t.Fatalf("red WebP pixel = %04x", got)
+	}
+	// An ancillary ICCP chunk must not bypass color-profile rejection.
+	profiled := append(append([]byte{}, data...), []byte{'I', 'C', 'C', 'P', 2, 0, 0, 0, 0, 0}...)
+	binary.LittleEndian.PutUint32(profiled[4:8], uint32(len(profiled)-8))
+	if _, err := Render(context.Background(), bytes.NewReader(profiled)); err == nil {
+		t.Fatal("accepted WebP ICC profile")
+	}
+}
+
+func TestRenderRecognizesOnlyCompleteKnownSRGBProfile(t *testing.T) {
+	profile, err := os.ReadFile("testdata/libvips-srgb.icm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	img.SetRGBA(0, 0, color.RGBA{255, 0, 0, 255})
+	var encoded bytes.Buffer
+	if err := jpeg.Encode(&encoded, img, nil); err != nil {
+		t.Fatal(err)
+	}
+	original := encoded.Bytes()
+	withICC := func(parts ...[]byte) []byte {
+		out := append([]byte{}, original[:2]...)
+		for i, part := range parts {
+			segment := append([]byte("ICC_PROFILE\x00"), byte(i+1), byte(len(parts)))
+			segment = append(segment, part...)
+			out = append(out, 0xff, 0xe2, byte((len(segment)+2)>>8), byte(len(segment)+2))
+			out = append(out, segment...)
+		}
+		return append(out, original[2:]...)
+	}
+	baseline, err := Render(context.Background(), bytes.NewReader(original))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, data := range [][]byte{withICC(profile), withICC(profile[:240], profile[240:])} {
+		pixels, err := Render(context.Background(), bytes.NewReader(data))
+		if err != nil || !bytes.Equal(pixels, baseline) {
+			t.Fatalf("known sRGB rejected or pixels changed: %v", err)
+		}
+	}
+	altered := append([]byte{}, profile...)
+	altered[100] ^= 1
+	if _, err := Render(context.Background(), bytes.NewReader(withICC(altered))); err == nil {
+		t.Fatal("unknown profile trusted by description")
+	}
+	incomplete := withICC(profile)
+	incomplete[2+4+13] = 2
+	if _, err := Render(context.Background(), bytes.NewReader(incomplete)); err == nil {
+		t.Fatal("missing ICC segment accepted")
+	}
+	duplicate := withICC(profile[:240], profile[240:])
+	second := 2 + 4 + 14 + 240
+	duplicate[second+4+12] = 1
+	if _, err := Render(context.Background(), bytes.NewReader(duplicate)); err == nil {
+		t.Fatal("duplicate ICC segment accepted")
+	}
+}
+
+func TestPinnedDisplayP3ProfileAndConversion(t *testing.T) {
+	profile, err := os.ReadFile("testdata/libvips-p3.icm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	img := image.NewRGBA(image.Rect(0, 0, 4, 4))
+	for y := 0; y < 4; y++ {
+		for x := 0; x < 4; x++ {
+			img.SetRGBA(x, y, color.RGBA{204, 102, 51, 255})
+		}
+	}
+	var encoded bytes.Buffer
+	jpeg.Encode(&encoded, img, &jpeg.Options{Quality: 100})
+	segment := append([]byte("ICC_PROFILE\x00"), 1, 1)
+	segment = append(segment, profile...)
+	data := append([]byte{}, encoded.Bytes()[:2]...)
+	data = append(data, 0xff, 0xe2, byte((len(segment)+2)>>8), byte(len(segment)+2))
+	data = append(data, segment...)
+	data = append(data, encoded.Bytes()[2:]...)
+	if hash, ok := jpegProfile(data); !ok || hash != libvipsP3Hash {
+		t.Fatal("standard Display P3 not recognized")
+	}
+	if _, err := Render(context.Background(), bytes.NewReader(data)); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range []uint32{0, 32768, 65535} {
+		r, g, b := p3ToSRGB(v, v, v)
+		if r != v || g != v || b != v {
+			t.Fatal("neutral color changed", v, r, g, b)
+		}
+	}
+	r, g, b := p3ToSRGB(52428, 26214, 13107)
+	// Golden vector calculated independently from the pinned ICC XYZ matrices.
+	for i, got := range []uint32{r, g, b} {
+		want := []int{56320, 24282, 8378}[i]
+		if diff := int(got) - want; diff < -3 || diff > 3 {
+			t.Fatalf("P3 channel %d = %d expected %d", i, got, want)
+		}
+	}
 }

@@ -74,8 +74,18 @@ func main() {
 	h.SetCalendarPlatform(cfg.CalendarPlatformBaseURL, cfg.CalendarPlatformToken, cfg.CalendarPlatformIDs, cfg.CalendarTimeZone)
 	h.SetOTA(cfg.OTAGitHubRepo, cfg.OTAGitHubToken, cfg.MigrateBridgeURL)
 	var photoSource photoframe.Source
-	if cfg.PhotoSource == "fixture" {
+	if cfg.PhotoEnabled && cfg.PhotoSource == "fixture" {
 		photoSource = photoframe.FixtureSource{}
+	}
+	if cfg.PhotoEnabled && cfg.PhotoSource == "immich" {
+		key, err := cfg.ReadImmichKey()
+		if err != nil {
+			log.Fatal(err)
+		}
+		photoSource, err = photoframe.NewImmich(cfg.ImmichBaseURL, cfg.ImmichAlbumID, key, client)
+		if err != nil {
+			log.Fatal("cannot initialize Immich photo source")
+		}
 	}
 	photos := photoframe.New(cfg.PhotoEnabled, photoSource, cfg.PhotoIdle, cfg.PhotoInterval, cfg.PhotoStale, cfg.PhotoCache)
 	h.SetPhotoFrame(photos)

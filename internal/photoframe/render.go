@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	_ "golang.org/x/image/webp"
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
@@ -17,18 +18,26 @@ const FrameBytes = Width * Height * 2
 const maxSource = 20 << 20
 const maxPixels = 24_000_000
 
-// Render decodes a bounded JPEG or PNG and emits top-down RGB565 little endian.
+// Render decodes a bounded JPEG, PNG or WebP and emits RGB565 little endian.
 func Render(ctx context.Context, r io.Reader) ([]byte, error) {
 	data, err := io.ReadAll(io.LimitReader(r, maxSource+1))
 	if err != nil || len(data) > maxSource {
 		return nil, errors.New("source read failed or exceeded limit")
 	}
 	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil || (format != "jpeg" && format != "png") || cfg.Width <= 0 || cfg.Height <= 0 || int64(cfg.Width)*int64(cfg.Height) > maxPixels {
+	if err != nil || (format != "jpeg" && format != "png" && format != "webp") || cfg.Width <= 0 || cfg.Height <= 0 || int64(cfg.Width)*int64(cfg.Height) > maxPixels {
 		return nil, errors.New("unsupported image or dimensions")
 	}
-	// Color-managed profiles are deliberately rejected until color conversion is supported.
-	if (format == "jpeg" && bytes.Contains(data, []byte("ICC_PROFILE\x00"))) || (format == "png" && bytes.Contains(data, []byte("iCCP"))) {
+	// Only the two pinned libvips sRGB/Display P3 JPEG profiles are supported.
+	convertP3 := false
+	if format == "jpeg" {
+		profile, supported := jpegProfile(data)
+		if !supported {
+			return nil, errors.New("unsupported color profile")
+		}
+		convertP3 = profile == libvipsP3Hash
+	}
+	if (format == "png" && bytes.Contains(data, []byte("iCCP"))) || (format == "webp" && webPHasProfile(data)) {
 		return nil, errors.New("unsupported color profile")
 	}
 	orient := 1
@@ -69,12 +78,30 @@ func Render(ctx context.Context, r io.Reader) ([]byte, error) {
 			ox, oy := x*ow/dw, y*oh/dh
 			sx, sy := sourcePoint(orient, ox, oy, sw, sh)
 			rr, gg, bb, _ := img.At(img.Bounds().Min.X+sx, img.Bounds().Min.Y+sy).RGBA() // premultiplied alpha composites on black
+			if convertP3 {
+				rr, gg, bb = p3ToSRGB(rr, gg, bb)
+			}
 			v := uint16(rr>>11)<<11 | uint16(gg>>10)<<5 | uint16(bb>>11)
 			p := ((top+y)*Width + left + x) * 2
 			binary.LittleEndian.PutUint16(out[p:p+2], v)
 		}
 	}
 	return out, nil
+}
+
+func webPHasProfile(data []byte) bool {
+	for p := 12; p+8 <= len(data); {
+		n := uint64(binary.LittleEndian.Uint32(data[p+4 : p+8]))
+		if string(data[p:p+4]) == "ICCP" {
+			return true
+		}
+		end := uint64(p) + 8 + n + n%2
+		if end > uint64(len(data)) {
+			return false // The decoder rejects the malformed image.
+		}
+		p = int(end)
+	}
+	return false
 }
 func sourcePoint(o, x, y, w, h int) (int, int) {
 	switch o {
