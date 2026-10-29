@@ -1,0 +1,11 @@
+# Add after the normal deployment compose files; contains no credentials.
+# Deploy only with the verified photo-frame CI image pinned by digest.
+services:
+  esp32-bridge:
+    environment:
+      PHOTO_FRAME_ENABLED: "true"
+      PHOTO_FRAME_SOURCE: "fixture"
+      PHOTO_FRAME_IDLE_SECONDS: "300"
+      PHOTO_FRAME_INTERVAL_SECONDS: "60"
+      PHOTO_FRAME_MAX_STALE_SECONDS: "900"
+      PHOTO_FRAME_CACHE_FRAMES: "32"

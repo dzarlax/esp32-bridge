@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"esp32-bridge/internal/config"
 	"esp32-bridge/internal/fetcher"
 	"esp32-bridge/internal/handler"
+	"esp32-bridge/internal/photoframe"
 )
 
 func main() {
@@ -71,6 +73,13 @@ func main() {
 	h := handler.New(orch, cfg.APIKey, cfg.HABaseURL, cfg.HAToken, cfg.HALights, cfg.HAClimates, client)
 	h.SetCalendarPlatform(cfg.CalendarPlatformBaseURL, cfg.CalendarPlatformToken, cfg.CalendarPlatformIDs, cfg.CalendarTimeZone)
 	h.SetOTA(cfg.OTAGitHubRepo, cfg.OTAGitHubToken, cfg.MigrateBridgeURL)
+	var photoSource photoframe.Source
+	if cfg.PhotoSource == "fixture" {
+		photoSource = photoframe.FixtureSource{}
+	}
+	photos := photoframe.New(cfg.PhotoEnabled, photoSource, cfg.PhotoIdle, cfg.PhotoInterval, cfg.PhotoStale, cfg.PhotoCache)
+	h.SetPhotoFrame(photos)
+	go photos.Run(context.Background())
 
 	if cfg.OTAGitHubRepo != "" {
 		log.Printf("OTA: repo %s", cfg.OTAGitHubRepo)
@@ -80,6 +89,8 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/api/photo-frame/v1/manifest", h.PhotoManifest)
+	mux.HandleFunc("/api/photo-frame/v1/frames/", h.PhotoFrame)
 	mux.HandleFunc("/api/dashboard", h.Dashboard)
 	mux.HandleFunc("/api/ha/action", h.HAAction)
 	mux.HandleFunc("/api/calendar", h.Calendar)

@@ -140,3 +140,19 @@ go run cmd/server/main.go  # Run locally
 ## License
 
 MIT
+
+### Photo frame (Stage A)
+
+The photo frame API is disabled by default. Set `PHOTO_FRAME_ENABLED=true` and
+`PHOTO_FRAME_SOURCE=fixture` to test synthetic images. `none` reports the source
+as unavailable; it does not read local image files. Optional settings are
+`PHOTO_FRAME_IDLE_SECONDS` (30–3600, default 300),
+`PHOTO_FRAME_INTERVAL_SECONDS` (15–3600, default 60),
+`PHOTO_FRAME_MAX_STALE_SECONDS` (60–3600, default 900), and
+`PHOTO_FRAME_CACHE_FRAMES` (16–32, default 32). JPEG and PNG source images are
+bounded to 20 MiB and 24 megapixels; images with embedded color profiles are
+not currently supported. The fixture is for local integration testing only.
+
+The authenticated `/api/photo-frame/v1/manifest` describes prepared frames;
+`/api/photo-frame/v1/frames/{id}` returns immutable 1024×600 RGB565 little-endian
+pixels. Rendering runs in a separate background worker, not in request handlers.

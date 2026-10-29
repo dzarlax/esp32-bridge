@@ -49,11 +49,26 @@ type Config struct {
 	OTAGitHubToken   string
 	MigrateBridgeURL string
 
+	PhotoEnabled                                     bool
+	PhotoSource                                      string
+	PhotoIdle, PhotoInterval, PhotoStale, PhotoCache int
+	photoErr                                         error
+
 	FetchTimeout time.Duration
 }
 
 func Load() *Config {
+	enabled, boolErr := strconv.ParseBool(envStr("PHOTO_FRAME_ENABLED", "false"))
+	idle, idleErr := strconv.Atoi(envStr("PHOTO_FRAME_IDLE_SECONDS", "300"))
+	interval, intervalErr := strconv.Atoi(envStr("PHOTO_FRAME_INTERVAL_SECONDS", "60"))
+	stale, staleErr := strconv.Atoi(envStr("PHOTO_FRAME_MAX_STALE_SECONDS", "900"))
+	cache, cacheErr := strconv.Atoi(envStr("PHOTO_FRAME_CACHE_FRAMES", "32"))
+	var photoErr error
+	if boolErr != nil || (enabled && (idleErr != nil || intervalErr != nil || staleErr != nil || cacheErr != nil)) {
+		photoErr = fmt.Errorf("invalid photo frame configuration")
+	}
 	return &Config{
+		PhotoEnabled: enabled, PhotoSource: envStr("PHOTO_FRAME_SOURCE", "none"), PhotoIdle: idle, PhotoInterval: interval, PhotoStale: stale, PhotoCache: cache, photoErr: photoErr,
 		ListenAddr: envStr("LISTEN_ADDR", ":8090"),
 		APIKey:     envStr("API_KEY", ""),
 
@@ -99,6 +114,12 @@ func Load() *Config {
 }
 
 func (c *Config) Validate() error {
+	if c.photoErr != nil {
+		return c.photoErr
+	}
+	if c.PhotoEnabled && ((c.PhotoSource != "none" && c.PhotoSource != "fixture") || c.PhotoIdle < 30 || c.PhotoIdle > 3600 || c.PhotoInterval < 15 || c.PhotoInterval > 3600 || c.PhotoStale < 60 || c.PhotoStale > 3600 || c.PhotoCache < 16 || c.PhotoCache > 32) {
+		return fmt.Errorf("invalid photo frame configuration")
+	}
 	if c.APIKey == "" {
 		return fmt.Errorf("API_KEY is required")
 	}
