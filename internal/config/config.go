@@ -55,6 +55,7 @@ type Config struct {
 	PhotoEnabled                                     bool
 	PhotoSource                                      string
 	ImmichBaseURL, ImmichAlbumID, ImmichAPIKeyFile   string
+	RuntimeImmichKey                                 string
 	PhotoIdle, PhotoInterval, PhotoStale, PhotoCache int
 	photoErr                                         error
 
@@ -157,6 +158,9 @@ func (c *Config) Validate() error {
 
 // ReadImmichKey reads a bounded secret without including its value or path in errors.
 func (c *Config) ReadImmichKey() (string, error) {
+	if c.RuntimeImmichKey != "" {
+		return c.RuntimeImmichKey, nil
+	}
 	f, err := os.Open(c.ImmichAPIKeyFile)
 	if err != nil {
 		return "", fmt.Errorf("cannot read IMMICH_API_KEY_FILE")

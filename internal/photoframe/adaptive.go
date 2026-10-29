@@ -30,12 +30,15 @@ func (p orientedPhoto) sample(x, y int) (uint32, uint32, uint32) {
 
 // Compare retained area exactly, after orientation. Equality uses cover.
 func cropWithinLimit(width, height int) bool {
+	return cropWithinPercent(width, height, maxCropLossPercent)
+}
+func cropWithinPercent(width, height, percent int) bool {
 	source := int64(width) * Height
 	target := int64(height) * Width
 	if source >= target {
-		return 100*target >= (100-maxCropLossPercent)*source
+		return 100*target >= int64(100-percent)*source
 	}
-	return 100*source >= (100-maxCropLossPercent)*target
+	return 100*source >= int64(100-percent)*target
 }
 
 // Rational pixel centers keep the same scale on both axes, including tiny sources.
@@ -86,7 +89,10 @@ func containRect(ow, oh int) image.Rectangle {
 }
 
 func renderAdaptive(ctx context.Context, p orientedPhoto, ow, oh int) ([]byte, error) {
-	if cropWithinLimit(ow, oh) {
+	return renderComposed(ctx, p, ow, oh, RenderOptions{Layout: "adaptive", CropLimitPercent: 10})
+}
+func renderComposed(ctx context.Context, p orientedPhoto, ow, oh int, options RenderOptions) ([]byte, error) {
+	if options.Layout == "cover" || (options.Layout == "adaptive" && cropWithinPercent(ow, oh, options.CropLimitPercent)) {
 		return renderCover(ctx, p, ow, oh)
 	}
 	small := image.NewRGBA(image.Rect(0, 0, backgroundWidth, backgroundHeight))

@@ -1,2 +1,13 @@
 .env
-server
+web/node_modules/
+web/dist/
+web/tsconfig.tsbuildinfo
+/server
+
+/data/
+
+/secrets/
+
+**/*.tsbuildinfo
+
+/admin-password

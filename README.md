@@ -202,3 +202,106 @@ display receives the next manifest or reaches its stale deadline.
 Keep `PHOTO_FRAME_SOURCE=fixture` until album access, preview rendering, service
 health and the physical display have been accepted. Rollback uses the previous
 pinned image/configuration and fixture source; no Immich media is modified.
+
+### Web settings panel
+
+The optional `/settings/` panel controls the display, photo frame, data sources,
+network, updates, and diagnostics. It is a React/TypeScript app compiled into the
+same Bridge binary and Docker image. Enable it explicitly with `ADMIN_ENABLED=true`;
+existing deployments keep the panel disabled until configured.
+
+One Bridge supports up to eight registered displays. Connections and credentials
+for Immich, Home Assistant and other upstream services are shared. Each display
+has its own screen preferences, photo album and placement, source selections,
+network settings, status and command queue. The device selector lists actual
+registrations; a new display appears after its first authenticated settings sync.
+Changing shared connections explicitly affects every display using that service.
+
+Managed firmware generates a stable `device_id` in a separate NVS namespace and
+sends `X-Device-ID` on all native API requests. The identity survives preferences
+reset, reboot and network changes. Unknown identities must sync before reading
+managed data. Headerless legacy reads keep the default environment configuration;
+when administration is disabled, native API behavior remains compatible.
+
+The panel supports either or both independent authentication methods:
+
+- Standalone administrator password: mount a private verifier file and set
+  `ADMIN_PASSWORD_HASH_FILE`. The browser receives an opaque session cookie,
+  not the display's API key. Generate the verifier without putting a password
+  in command arguments or shell history, for example:
+
+  ```sh
+  mkdir -p secrets
+  chmod 700 secrets
+  python3 -c 'import getpass,sys; sys.stdout.write(getpass.getpass("Admin password: "))' | go run ./cmd/admin-password -out secrets/admin-password-hash
+  ```
+
+  The output is a salted PBKDF2-SHA256 verifier (600,000 iterations), mode 0600.
+  Mount it read-only at `/run/secrets/admin-password-hash` and set that path in
+  `ADMIN_PASSWORD_HASH_FILE`. Keep `secrets/` outside Git. The image also includes
+  `/app/admin-password` for deployments without a Go installation.
+- Optional Cloudflare Access: set `ADMIN_CF_TEAM_DOMAIN` (the team's
+  `https://…cloudflareaccess.com` URL), `ADMIN_CF_AUDIENCE`, and comma-separated
+  `ADMIN_CF_EMAILS`. Bridge checks signature, issuer, audience, expiry and the
+  email allowlist on the origin. A forged identity header is insufficient.
+  To keep password and Access login independent, protect only
+  `/api/admin/v1/auth/cloudflare` in Access and disable its Cookie Path Attribute.
+  Bridge validates the signed Access application JWT from the assertion header or
+  the HttpOnly `CF_Authorization` cookie on every Access session request. The
+  callback creates the admin session and returns to `/settings/`. Native device
+  endpoints keep their existing authentication. Password-only installations need
+  no Cloudflare.
+
+Set `ADMIN_BASE_URL` to the exact externally visible origin (HTTPS in production).
+`http://127.0.0.1:<port>` and other loopback origins are supported for local tests.
+Browser writes require a session, exact Origin, and a CSRF token; the device API
+key does not grant administrator access. When enabled without a complete valid
+authentication method, startup fails closed.
+
+The Compose definition mounts `./data:/data`. `ADMIN_STATE_DIR` must be a private
+mode-0700 directory on that persistent volume; state files are mode 0600. They
+contain sensitive configuration and must stay out of Git, diagnostics, and
+ordinary backups intended for sharing. Environment values and mounted secrets
+provide initial defaults; UI overrides are stored separately with versioned,
+atomic writes. The panel never overwrites the VPS `.env` or original secret files.
+Back up the private state directory before changing deployment storage.
+
+Server changes take effect after validation and persistence. Device changes show
+as pending until managed firmware confirms the applied revision; disconnected
+or legacy firmware is not reported as configured. The existing NVS Bridge API
+key represents fully trusted displays belonging to one owner, including sync and existing Home
+Assistant commands. This is not multi-owner isolation: a compromised shared key
+can impersonate another display. Do not distribute it as a read-only token. No device keys,
+provider tokens or Wi-Fi passwords are returned by administrative reads.
+
+The panel configures one shared Immich endpoint and read-only key, with a separate
+album UUID for each display. Managed frame caches are bounded to 16 frames per
+display and image decoding uses one global slot; identical upstream fetches reuse
+a cache keyed by their effective configuration. Google Photos
+is explicitly unavailable until its adapter and production API access exist.
+Brightness is unavailable until the hardware advertises support. Photo placement
+supports adaptive crop with an adjustable threshold, full-photo blurred background,
+and cover; rendering options and source changes invalidate the prepared frames.
+The illustration in the panel is a sample preview, not a private photo download.
+
+Build and check locally:
+
+```sh
+cd web
+npm ci
+npm run typecheck
+npm test
+npm run build
+cd ..
+go test ./...
+go test -race ./internal/adminauth ./internal/settings ./internal/management ./internal/photoframe
+go vet ./...
+go build -tags webassets ./cmd/server
+```
+
+The CI and Docker builds produce the frontend before the embedded Go binary.
+Without the `webassets` tag a developer build can serve `web/dist`; if the frontend
+has not been built it returns 503 rather than a blank or placeholder panel.
+The device protocol and safe network/command lifecycle are documented in
+[settings-contract.md](docs/settings-contract.md). Firmware publication and a
+real device update remain separate release actions.

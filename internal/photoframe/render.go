@@ -19,7 +19,31 @@ const maxSource = 20 << 20
 const maxPixels = 24_000_000
 
 // Render decodes a bounded JPEG, PNG or WebP and emits RGB565 little endian.
+var renderSlots = make(chan struct{}, 1)
+
+type RenderOptions struct {
+	Layout           string
+	CropLimitPercent int
+}
+
 func Render(ctx context.Context, r io.Reader) ([]byte, error) {
+	return RenderWithOptions(ctx, r, RenderOptions{Layout: "adaptive", CropLimitPercent: 10})
+}
+
+func RenderWithOptions(ctx context.Context, r io.Reader, options RenderOptions) ([]byte, error) {
+	if (options.Layout != "adaptive" && options.Layout != "contain" && options.Layout != "cover") || options.CropLimitPercent < 0 || options.CropLimitPercent > 40 {
+		return nil, errors.New("invalid render options")
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	select {
+	case renderSlots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	defer func() { <-renderSlots }()
 	data, err := io.ReadAll(io.LimitReader(r, maxSource+1))
 	if err != nil || len(data) > maxSource {
 		return nil, errors.New("source read failed or exceeded limit")
@@ -56,7 +80,7 @@ func Render(ctx context.Context, r io.Reader) ([]byte, error) {
 	if orient >= 5 {
 		ow, oh = sh, sw
 	}
-	return renderAdaptive(ctx, orientedPhoto{img: img, width: sw, height: sh, orientation: orient, p3: convertP3}, ow, oh)
+	return renderComposed(ctx, orientedPhoto{img: img, width: sw, height: sh, orientation: orient, p3: convertP3}, ow, oh, options)
 }
 
 func webPHasProfile(data []byte) bool {

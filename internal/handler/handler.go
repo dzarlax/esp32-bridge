@@ -763,3 +763,14 @@ func compareVersions(remote, client string) int {
 	}
 	return 0
 }
+
+// FirmwareStatus reports actual release data without requesting a device flash.
+func (h *Handler) FirmwareStatus(current string) map[string]any {
+	h.otaMu.Lock()
+	defer h.otaMu.Unlock()
+	if h.otaGitHubRepo != "" {
+		h.refreshLatestReleaseLocked()
+	}
+	available := h.otaLatestVersion
+	return map[string]any{"current_version": current, "available_version": available, "update_available": current != "" && available != "" && compareVersions(available, current) > 0}
+}

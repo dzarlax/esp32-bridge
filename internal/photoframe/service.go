@@ -48,6 +48,8 @@ type cached struct {
 	pins      int
 }
 type Service struct {
+	renderOptions     RenderOptions
+	sequential        bool
 	mu                sync.RWMutex
 	manifest          Manifest
 	cache             map[string]*cached
@@ -75,7 +77,16 @@ func New(enabled bool, source Source, idle, interval, stale, limit int) *Service
 			state = "unavailable"
 		}
 	}
-	return &Service{manifest: Manifest{Version: 1, State: state, Generation: hex.EncodeToString(nonce[:]), Idle: idle, Interval: interval, Stale: stale, Width: Width, Height: Height, Format: "rgb565le", Bytes: FrameBytes, Frames: []Frame{}}, cache: map[string]*cached{}, limit: limit, source: source, enabled: enabled, transfers: make(chan struct{}, 2), byAsset: map[string]string{}, shuffle: mrand.Shuffle}
+	return &Service{renderOptions: RenderOptions{Layout: "adaptive", CropLimitPercent: 10}, manifest: Manifest{Version: 1, State: state, Generation: hex.EncodeToString(nonce[:]), Idle: idle, Interval: interval, Stale: stale, Width: Width, Height: Height, Format: "rgb565le", Bytes: FrameBytes, Frames: []Frame{}}, cache: map[string]*cached{}, limit: limit, source: source, enabled: enabled, transfers: make(chan struct{}, 2), byAsset: map[string]string{}, shuffle: mrand.Shuffle}
+}
+
+// Configure is called only before Run; each runtime snapshot owns its service.
+func (s *Service) Configure(options RenderOptions, order string) {
+	s.renderOptions = options
+	if order == "sequential" {
+		s.sequential = true
+		s.shuffle = func(int, func(int, int)) {}
+	}
 }
 func (s *Service) Manifest() Manifest {
 	s.mu.Lock()
@@ -188,7 +199,7 @@ func (s *Service) refresh(parent context.Context) {
 			previous := s.window[0]
 			s.window = append(s.window[1:], s.window[0])
 			s.smallSteps++
-			if s.smallSteps >= len(s.window) && len(s.window) > 1 {
+			if !s.sequential && s.smallSteps >= len(s.window) && len(s.window) > 1 {
 				s.shuffle(len(s.window), func(i, j int) { s.window[i], s.window[j] = s.window[j], s.window[i] })
 				if s.window[0] == previous {
 					s.window[0], s.window[1] = s.window[1], s.window[0]
@@ -205,7 +216,7 @@ func (s *Service) refresh(parent context.Context) {
 		if s.pos >= len(s.cycle) {
 			last := assetKey(s.cycle[len(s.cycle)-1])
 			s.shuffle(len(s.cycle), func(i, j int) { s.cycle[i], s.cycle[j] = s.cycle[j], s.cycle[i] })
-			if len(s.cycle) > 1 && assetKey(s.cycle[0]) == last {
+			if !s.sequential && len(s.cycle) > 1 && assetKey(s.cycle[0]) == last {
 				s.cycle[0], s.cycle[1] = s.cycle[1], s.cycle[0]
 			}
 			s.pos = 0
@@ -252,7 +263,7 @@ func (s *Service) refresh(parent context.Context) {
 				s.pos++
 				continue
 			}
-			data, e := Render(ctx, r)
+			data, e := RenderWithOptions(ctx, r, s.renderOptions)
 			_ = r.Close()
 			if e != nil {
 				s.pos++
