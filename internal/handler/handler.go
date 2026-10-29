@@ -15,9 +15,11 @@ import (
 
 	"esp32-bridge/internal/fetcher"
 	"esp32-bridge/internal/model"
+	"esp32-bridge/internal/photoframe"
 )
 
 type Handler struct {
+	photoFrame              *photoframe.Service
 	orch                    *fetcher.Orchestrator
 	apiKey                  string
 	haBaseURL               string
