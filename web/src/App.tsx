@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AdminApi, isRevisionConflict } from "./api";
+import { photoTimingError, type PhotoTiming } from "./validation";
 import { ConnectionsPage } from "./connections-page";
 import { ConfirmDialog, DevicePage, UpdatesPage } from "./device-pages";
 import { NetworkPage, ServicesPage } from "./service-pages";
@@ -74,6 +75,13 @@ export default function App() {
   const [networkCredentials, setNetworkCredentials] = useState<Record<string, string>>({});
   const [connections, setConnections] = useState<ConnectionsEnvelope | null>(null);
   const [section, setSection] = useState<SectionId>("screen");
+  const settingsFieldsRef = useRef<HTMLDivElement>(null);
+  const [invalidTiming, setInvalidTiming] = useState<PhotoTiming | null>(null);
+  useEffect(() => {
+    if (!invalidTiming) return;
+    settingsFieldsRef.current?.querySelector<HTMLInputElement>(`[data-photo-timing="${invalidTiming}"]`)?.focus();
+    setInvalidTiming(null);
+  }, [invalidTiming, section]);
   const [showConnections, setShowConnections] = useState(false);
   const connectionsDirtyRef = useRef(false);
   const [mobileNav, setMobileNav] = useState(false);
@@ -259,6 +267,14 @@ export default function App() {
   async function save(): Promise<string | null> {
     const deviceId = selectedDeviceRef.current;
     if (!draft || !envelope || !deviceId || busy) return "Сохранение сейчас недоступно. Повторите попытку.";
+    const validation = photoTimingError(draft.photos);
+    if (validation) {
+      setAlert({ kind: "error", text: validation.message });
+      if (section !== "screen" && section !== "photos") setSection("photos");
+      if (validation.field === "interval_seconds" && section === "screen") setSection("photos");
+      setInvalidTiming(validation.field);
+      return validation.message;
+    }
     const epoch = selectionEpoch.current;
     setBusy(true);
     setAlert(null);
@@ -411,7 +427,7 @@ export default function App() {
         {devices && !showConnections && devices.devices.length > 0 && !pageProps && <div className="loading-screen"><div className="spinner" />Загружаем настройки дисплея…<button className="button secondary" onClick={() => selectedDeviceId && void loadDevice(selectedDeviceId).catch(() => undefined)}>Повторить</button></div>}
         {pageProps && !showConnections && <>
           {conflict && <div className="alert error" role="alert"><span>Настройки этого дисплея изменились в другом сеансе. Черновик сохранён.</span><div className="conflict-actions"><button className="button secondary" onClick={cancel}>Загрузить актуальные и отменить черновик</button><button className="button primary" disabled={busy} onClick={() => { if (envelope) baseRevisionRef.current = envelope.revision; setConflict(false); void save(); }}>Сохранить черновик поверх текущей версии</button></div></div>}
-          <div className="page-body">
+          <div className="page-body" ref={settingsFieldsRef}>
             {section === "screen" && <ScreenPage {...pageProps} />}
             {section === "photos" && <PhotosPage {...pageProps} />}
             {section === "services" && <ServicesPage {...pageProps} />}

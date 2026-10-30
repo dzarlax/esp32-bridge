@@ -5,6 +5,36 @@ import { formatUptime, isCommandFinal, type Envelope, type SharedConnections } f
 afterEach(() => vi.unstubAllGlobals());
 
 describe("AdminApi", () => {
+  it.each([
+    ["invalid_settings", 422, "Проверьте значения"],
+    ["device unavailable or action unsupported", 409, "Дисплей не на связи"],
+    ["a device command is pending", 409, "предыдущую команду"],
+    ["opaque_backend_failure", 503, "Bridge временно"],
+    ["__proto__", 503, "Bridge временно"],
+  ])("explains %s without exposing the raw server code", async (code, status, expected) => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: code }), {
+      status: Number(status), headers: { "Content-Type": "application/json" },
+    })));
+    const error = await new AdminApi().devices().catch((value) => value);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.message).toContain(expected);
+    expect(error.message).not.toContain(code);
+    expect(error.code).toBe(code);
+    expect(error.body.error).toBe(code);
+  });
+
+  it("explains network failure and an unexpected successful response", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Failed to fetch"); }));
+    await expect(new AdminApi().devices()).rejects.toMatchObject({ code: "network_error", message: expect.stringContaining("Не удалось связаться") });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("not JSON", { status: 200 })));
+    await expect(new AdminApi().devices()).rejects.toMatchObject({ code: "invalid_response", message: expect.stringContaining("неожиданный ответ") });
+  });
+
+  it("explains a rejected login as an incorrect password", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("unauthorized", { status: 401 })));
+    await expect(new AdminApi().login("wrong")).rejects.toMatchObject({ code: "invalid_password", message: expect.stringContaining("Неверный пароль") });
+  });
+
   it("uses same-origin cookies and session CSRF for settings writes", async () => {
     const deviceId = "a".repeat(32);
     const fetchMock = vi.fn(
@@ -47,7 +77,8 @@ describe("AdminApi", () => {
     const error = await new AdminApi().settings("a".repeat(32)).catch((value) => value);
     expect(error).toBeInstanceOf(ApiError);
     expect(error).toMatchObject({ status: 409 });
-    expect((error as ApiError).message).toBe("revision conflict");
+    expect((error as ApiError).message).toContain("Настройки уже изменились");
+    expect((error as ApiError).code).toBe("revision conflict");
   });
 
   it("distinguishes a revision conflict from an offline network change", () => {
@@ -86,7 +117,7 @@ describe("AdminApi", () => {
     const error = await new AdminApi().session().catch((value) => value);
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).status).toBe(401);
-    expect((error as ApiError).message).toBe("not authorized");
+    expect((error as ApiError).message).toContain("Войдите снова");
   });
 
   it("normalizes omitted optional service lists to empty arrays", async () => {

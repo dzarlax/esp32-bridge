@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import type { Settings } from "./types";
+import { errorMessage } from "./error-messages";
 import type { PageProps } from "./page-types";
 import {
   appliedSettingsStatus,
@@ -345,7 +346,7 @@ export function ServicesPage(props: PageProps) {
                     </small>
                   )}
                   {status?.error && (
-                    <small className="error-text">{status.error}</small>
+                    <small className="error-text">{errorMessage(status.error, "Не удалось получить данные. Проверьте подключение к сервису в разделе «Общие подключения».")}</small>
                   )}
                 </span>
               </button>

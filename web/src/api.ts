@@ -8,14 +8,15 @@ import type {
   SharedConnections,
   UpdateInfo,
 } from "./types";
+import { apiErrorMessage } from "./error-messages";
 
 export class ApiError extends Error {
   constructor(
-    message: string,
+    readonly code: string,
     readonly status: number,
     readonly body?: unknown,
   ) {
-    super(message);
+    super(apiErrorMessage(code, status));
   }
 }
 
@@ -46,7 +47,7 @@ async function decode<T>(response: Response): Promise<T> {
   }
   return response.status === 204
     ? (undefined as T)
-    : (response.json() as Promise<T>);
+    : (response.json().catch(() => { throw new ApiError("invalid_response", 502); }) as Promise<T>);
 }
 
 export class AdminApi {
@@ -67,6 +68,9 @@ export class AdminApi {
       headers,
       credentials: "same-origin",
       cache: "no-store",
+    }).catch((error: unknown) => {
+      if (error instanceof Error && error.name === "AbortError") throw error;
+      throw new ApiError("network_error", 0);
     });
     if (response.status === 401 && path !== "/api/admin/v1/session")
       window.dispatchEvent(new CustomEvent("admin-auth-expired"));
@@ -79,6 +83,9 @@ export class AdminApi {
     const value = await this.request<Session>("/api/admin/v1/login", {
       method: "POST",
       body: JSON.stringify({ password }),
+    }).catch((error: unknown) => {
+      if (error instanceof ApiError && error.status === 401) throw new ApiError("invalid_password", 401, error.body);
+      throw error;
     });
     this.setCsrf(value.csrf_token);
     return value;

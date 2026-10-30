@@ -40,7 +40,7 @@ function json(value: unknown) {
 }
 
 function installFetch(devices: { id: string; name: string }[], settings: (id: string) => Promise<unknown>) {
-  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
     const path = String(input);
     if (path.endsWith("/session")) return json({ authenticated: true, password_enabled: true, cloudflare_enabled: false, csrf_token: "csrf" });
     if (path.endsWith("/devices")) return json({ devices: devices.map(({ id, name }) => ({ id, name, connected: true, last_seen: new Date().toISOString(), applied_revision: 2, desired_revision: 2, firmware: "1.0", ip: "192.0.2.10", ssid: "Test" })), max_devices: 8 });
@@ -57,6 +57,39 @@ function installFetch(devices: { id: string; name: string }[], settings: (id: st
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe("multi-display shell", () => {
+  it("explains the separate minimum for photo changes", async () => {
+    const fetchMock = installFetch([{ id: firstId, name: "Hall" }], async (id) => settingsEnvelope(id, "Hall"));
+    render(<App />);
+    await screen.findByLabelText("Задержка бездействия");
+    fireEvent.click(screen.getByRole("button", { name: "Фоторамка" }));
+    const input = await screen.findByLabelText("Интервал смены фотографии");
+    fireEvent.change(input, { target: { value: "5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения" }));
+    await waitFor(() => expect(document.activeElement).toBe(input));
+    expect(screen.getByText("Введите целое число от 15 до 3600 сек.")).toBeTruthy();
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(0);
+  });
+
+  it("rejects a five-second idle delay locally and saves after correction", async () => {
+    const fetchMock = installFetch([{ id: firstId, name: "Hall" }], async (id) => settingsEnvelope(id, "Hall"));
+    render(<App />);
+    const input = await screen.findByLabelText("Задержка бездействия");
+    fireEvent.change(input, { target: { value: "5" } });
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getByText("Введите целое число от 30 до 3600 сек.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения" }));
+    await waitFor(() => expect(document.activeElement).toBe(input));
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(0);
+    expect(screen.getByRole("alert").textContent).toContain("Запуск после бездействия");
+    fireEvent.change(input, { target: { value: "30" } });
+    expect(input.getAttribute("aria-invalid")).toBe("false");
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения" }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(1));
+    const [, init] = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH")!;
+    expect(JSON.parse(String(init?.body)).settings.photos.idle_seconds).toBe(30);
+  });
+
   it("shows setup instructions and shared connections when no display is registered", async () => {
     installFetch([], async () => ({}));
     render(<App />);
