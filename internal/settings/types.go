@@ -8,17 +8,20 @@ import (
 )
 
 type Screen struct {
-	Locale          string `json:"locale"`
-	Name            string `json:"name"`
-	City            string `json:"city"`
-	Timezone        string `json:"timezone"`
-	ClockFormat     string `json:"clock_format"`
-	IdleAction      string `json:"idle_action"`
-	NightEnabled    bool   `json:"night_enabled"`
-	NightStart      string `json:"night_start"`
-	NightEnd        string `json:"night_end"`
-	AutoUpdateCheck bool   `json:"auto_update_check"`
-	AutoInstall     bool   `json:"auto_install"`
+	Locale                string `json:"locale"`
+	Name                  string `json:"name"`
+	City                  string `json:"city"`
+	Timezone              string `json:"timezone"`
+	ClockFormat           string `json:"clock_format"`
+	IdleAction            string `json:"idle_action"`
+	NightEnabled          bool   `json:"night_enabled"`
+	NightStart            string `json:"night_start"`
+	NightEnd              string `json:"night_end"`
+	AutoUpdateCheck       bool   `json:"auto_update_check"`
+	AutoInstall           bool   `json:"auto_install"`
+	BacklightPercent      *int   `json:"backlight_percent,omitempty"`
+	NightAction           string `json:"night_action,omitempty"`
+	NightBacklightPercent *int   `json:"night_backlight_percent,omitempty"`
 }
 type Photos struct {
 	ShowClock        *bool  `json:"show_clock,omitempty"`
@@ -34,18 +37,24 @@ type Photos struct {
 	Layout           string `json:"layout"`
 	CropLimitPercent int    `json:"crop_limit_percent"`
 }
+type Favorite struct {
+	EntityID string `json:"entity_id"`
+	Kind     string `json:"kind"`
+	Label    string `json:"label,omitempty"`
+}
 type Service struct {
-	Enabled    bool     `json:"enabled"`
-	BaseURL    string   `json:"base_url"`
-	IDs        []string `json:"ids"`
-	Timezone   string   `json:"timezone"`
-	Latitude   float64  `json:"latitude"`
-	Longitude  float64  `json:"longitude"`
-	Limit      int      `json:"limit"`
-	SinceHours int      `json:"since_hours"`
-	Sensors    []string `json:"sensors"`
-	Lights     []string `json:"lights"`
-	Climates   []string `json:"climates"`
+	Favorites  []Favorite `json:"favorites,omitempty"`
+	Enabled    bool       `json:"enabled"`
+	BaseURL    string     `json:"base_url"`
+	IDs        []string   `json:"ids"`
+	Timezone   string     `json:"timezone"`
+	Latitude   float64    `json:"latitude"`
+	Longitude  float64    `json:"longitude"`
+	Limit      int        `json:"limit"`
+	SinceHours int        `json:"since_hours"`
+	Sensors    []string   `json:"sensors"`
+	Lights     []string   `json:"lights"`
+	Climates   []string   `json:"climates"`
 }
 type Network struct {
 	BridgeURL string `json:"bridge_url"`
@@ -74,13 +83,26 @@ type Values struct {
 	Network  Network            `json:"network"`
 }
 type Command struct {
-	ID        string    `json:"id"`
-	Action    string    `json:"action"`
-	State     string    `json:"state"`
-	CreatedAt time.Time `json:"created_at"`
-	ExpiresAt time.Time `json:"expires_at"`
-	Error     string    `json:"error,omitempty"`
-	BootID    string    `json:"boot_id,omitempty"`
+	ID            string    `json:"id"`
+	Action        string    `json:"action"`
+	State         string    `json:"state"`
+	CreatedAt     time.Time `json:"created_at"`
+	ExpiresAt     time.Time `json:"expires_at"`
+	Error         string    `json:"error,omitempty"`
+	BootID        string    `json:"boot_id,omitempty"`
+	Percent       *int      `json:"percent,omitempty"`
+	TargetVersion string    `json:"target_version,omitempty"`
+}
+type OTAAttempt struct {
+	ID               string     `json:"id"`
+	Version          string     `json:"version"`
+	PreviousVersion  string     `json:"previous_version,omitempty"`
+	InstalledVersion string     `json:"installed_version,omitempty"`
+	State            string     `json:"state"`
+	At               time.Time  `json:"at"`
+	UpdatedAt        *time.Time `json:"updated_at,omitempty"`
+	Stage            string     `json:"stage,omitempty"`
+	Error            string     `json:"error,omitempty"`
 }
 type Result struct {
 	ID    string `json:"id"`
@@ -105,6 +127,11 @@ type Device struct {
 	CommandResult    *Result    `json:"command_result,omitempty"`
 	AvailableVersion string     `json:"available_version,omitempty"`
 	OTAProgress      int        `json:"ota_progress,omitempty"`
+	OTAAttemptID     string     `json:"ota_attempt_id,omitempty"`
+	OTAStage         string     `json:"ota_stage,omitempty"`
+	OTAError         string     `json:"ota_error,omitempty"`
+	BacklightPercent *int       `json:"backlight_percent,omitempty"`
+	BacklightError   string     `json:"backlight_error,omitempty"`
 	Model            string     `json:"model,omitempty"`
 	Width            int        `json:"width,omitempty"`
 	Height           int        `json:"height,omitempty"`
@@ -163,7 +190,11 @@ type SyncResponse struct {
 	Preferences Preferences `json:"preferences"`
 	Command     *Command    `json:"command"`
 }
+type HomePreferences struct {
+	Favorites []Favorite `json:"favorites"`
+}
 type Preferences struct {
+	Home          HomePreferences   `json:"home"`
 	Screen        Screen            `json:"screen"`
 	Photos        Photos            `json:"photos"`
 	Visible       map[string]bool   `json:"visible"`

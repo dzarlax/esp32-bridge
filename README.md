@@ -378,3 +378,9 @@ long-running Wi-Fi acceptance remain separate from server and simulator checks.
 ## License
 
 MIT
+
+### Home settings and source catalogs
+
+Bridge supports per-display Home favorites, read-only album and calendar catalogs, persistent OTA attempt history, and capability-gated brightness settings and preview commands. Native Home favorites and detailed OTA reporting require HomeDash v1.0.30 or newer. Brightness requires a calibrated and supported device; hardware behavior and physical acceptance remain unverified. Catalogs use only saved shared connections and credentials and do not expose photo previews or calendar events. OTA history records device-reported results, while a timeout is unknown rather than a failure.
+
+Rollback requires a private, verified backup of the complete Bridge settings state made before this version writes it. Earlier Bridge versions decode stored JSON strictly and cannot safely read state containing the new optional fields; restoring that backup also restores the settings, credentials, revisions, and command state it contained at backup time. Do not overwrite newer state without accounting for those changes.

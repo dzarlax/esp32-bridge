@@ -1,4 +1,5 @@
 import type {
+  Catalog,
   Command,
   ConnectionsEnvelope,
   DeviceList,
@@ -148,19 +149,23 @@ export class AdminApi {
       body: JSON.stringify(body),
     });
   }
+  catalog(deviceId: string, kind: "albums" | "calendars") {
+    return this.request<Catalog>(this.devicePath(deviceId, kind));
+  }
   updates(deviceId: string) {
     return this.request<UpdateInfo>(this.devicePath(deviceId, "updates"));
   }
   action(
     deviceId: string,
-    action: "photo_start" | "restart" | "ota_check" | "ota_install" | "reset",
+    action: "photo_start" | "restart" | "ota_check" | "ota_install" | "reset" | "backlight_preview" | "backlight_restore",
+    percent?: number,
   ) {
     const confirm = ["restart", "ota_install", "reset"].includes(action)
       ? true
       : undefined;
     return this.request<{ command: Command }>(this.devicePath(deviceId, "actions"), {
       method: "POST",
-      body: JSON.stringify({ action, ...(confirm ? { confirm } : {}) }),
+      body: JSON.stringify({ action, ...(confirm ? { confirm } : {}), ...(percent !== undefined ? { percent } : {}) }),
     });
   }
   async diagnostics(deviceId: string) {
@@ -235,6 +240,7 @@ function normalizeEnvelope(envelope: Envelope): Envelope {
           lights: Array.isArray(services.home?.lights)
             ? services.home.lights
             : [],
+          favorites: Array.isArray(services.home?.favorites) ? services.home.favorites : [],
           climates: Array.isArray(services.home?.climates)
             ? services.home.climates
             : [],

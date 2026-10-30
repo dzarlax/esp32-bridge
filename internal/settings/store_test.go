@@ -562,3 +562,214 @@ func TestPhotoOverlaySettingsPersistPerDevice(t *testing.T) {
 		t.Fatal("other device changed")
 	}
 }
+
+func TestFavoritesCapabilitiesAndRetainedUnavailable(t *testing.T) {
+	s, _ := newStore(t, nil)
+	id := testID('a')
+	register(t, s, id, "boot", "home_favorites")
+	view, _ := s.View(id, nil)
+	home := view.Settings.Services["home"]
+	home.Lights = []string{"light.lamp"}
+	home.Favorites = []Favorite{{EntityID: "light.lamp", Kind: "light", Label: "Lamp"}}
+	view.Settings.Services["home"] = home
+	if err := s.Update(id, view.Revision, Patch{Settings: view.Settings}); err != nil {
+		t.Fatal(err)
+	}
+	sync, err := s.Sync(report(s, id, "boot", "home_favorites"))
+	if err != nil || len(sync.Preferences.Home.Favorites) != 1 {
+		t.Fatalf("projection %v %#v", err, sync.Preferences.Home)
+	}
+	view, _ = s.View(id, nil)
+	home = view.Settings.Services["home"]
+	home.Lights = nil
+	view.Settings.Services["home"] = home
+	if err := s.Update(id, view.Revision, Patch{Settings: view.Settings}); err != nil {
+		t.Fatal(err)
+	}
+	view, _ = s.View(id, nil)
+	home = view.Settings.Services["home"]
+	home.Favorites[0].Label = "new"
+	view.Settings.Services["home"] = home
+	if err := s.Update(id, view.Revision, Patch{Settings: view.Settings}); err == nil {
+		t.Fatal("unconfigured favorite modified")
+	}
+}
+
+func TestOTAAttemptPersistsAndLateResult(t *testing.T) {
+	s, dir := newStore(t, nil)
+	id := testID('a')
+	register(t, s, id, "boot", "ota_install", "photo_start")
+	cmd, err := s.EnqueueOptions(id, "ota_install", true, nil, "2.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	p := s.state.Profiles[id]
+	p.Command.CreatedAt = time.Now().Add(-11 * time.Minute)
+	p.Command.ExpiresAt = time.Now().Add(-time.Minute)
+	s.state.Profiles[id] = p
+	s.mu.Unlock()
+	history, err := s.OTAHistory(id)
+	if err != nil || len(history) != 1 || history[0].State != "unknown" {
+		t.Fatalf("history %v %#v", err, history)
+	}
+	if _, err = s.Enqueue(id, "photo_start", false); err != nil {
+		t.Fatal(err)
+	}
+	d := report(s, id, "newboot", "ota_install", "photo_start")
+	d.Firmware = "2.0.0"
+	d.CommandResult = &Result{ID: cmd.ID, State: "succeeded"}
+	if _, err = s.Sync(d); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := New(dir, testValues(), map[string]string{"health_api_key": "default-health"}, "https://bridge.example.test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	history, err = restarted.OTAHistory(id)
+	if err != nil || history[0].State != "succeeded" || history[0].InstalledVersion != "2.0.0" {
+		t.Fatalf("late result %v %#v", err, history)
+	}
+}
+
+func TestBrightnessCapabilityAndAction(t *testing.T) {
+	s, _ := newStore(t, nil)
+	id := testID('a')
+	register(t, s, id, "boot")
+	v, _ := s.View(id, nil)
+	n := 50
+	v.Settings.Screen.BacklightPercent = &n
+	if err := s.Update(id, v.Revision, Patch{Settings: v.Settings}); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("unsupported brightness: %v", err)
+	}
+	register(t, s, id, "boot", "backlight_brightness", "backlight_preview", "backlight_restore")
+	v, _ = s.View(id, nil)
+	v.Settings.Screen.BacklightPercent = &n
+	if err := s.Update(id, v.Revision, Patch{Settings: v.Settings}); err != nil {
+		t.Fatal(err)
+	}
+	cmd, err := s.EnqueueOptions(id, "backlight_preview", false, &n, "")
+	if err != nil || cmd.Percent == nil || *cmd.Percent != 50 {
+		t.Fatalf("preview %v %#v", err, cmd)
+	}
+}
+
+func TestOTAAttemptLimitAndAtomicEnqueueFailure(t *testing.T) {
+	s, _ := newStore(t, nil)
+	id := testID('a')
+	register(t, s, id, "boot", "ota_install")
+	for i := 0; i < 101; i++ {
+		c, err := s.EnqueueOptions(id, "ota_install", true, nil, "2")
+		if err != nil {
+			t.Fatal(err)
+		}
+		d := report(s, id, "boot", "ota_install")
+		d.CommandResult = &Result{ID: c.ID, State: "failed"}
+		if _, err = s.Sync(d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before, err := s.OTAHistory(id)
+	if err != nil || len(before) != 100 {
+		t.Fatalf("history count %d %v", len(before), err)
+	}
+	if err := os.Rename(s.path, s.path+".backup"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(s.path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.EnqueueOptions(id, "ota_install", true, nil, "3"); err == nil {
+		t.Fatal("enqueue should fail")
+	}
+	after, err := s.OTAHistory(id)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatal("failed enqueue changed history")
+	}
+}
+
+func TestOTATargetMismatchAndTerminalResultImmutability(t *testing.T) {
+	s, _ := newStore(t, nil)
+	id := testID('a')
+	register(t, s, id, "boot", "ota_install")
+	cmd, err := s.EnqueueOptions(id, "ota_install", true, nil, "2.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := report(s, id, "boot2", "ota_install")
+	d.Firmware = "1.5"
+	d.CommandResult = &Result{ID: cmd.ID, State: "succeeded"}
+	if _, err = s.Sync(d); err != nil {
+		t.Fatal(err)
+	}
+	h, _ := s.OTAHistory(id)
+	if h[0].State != "unknown" || h[0].InstalledVersion != "" {
+		t.Fatalf("wrong target: %#v", h[0])
+	}
+	d.Firmware = "2.0"
+	if _, err = s.Sync(d); err != nil {
+		t.Fatal(err)
+	}
+	d.CommandResult.State = "failed"
+	if _, err = s.Sync(d); err != nil {
+		t.Fatal(err)
+	}
+	h, _ = s.OTAHistory(id)
+	if h[0].State != "succeeded" || h[0].InstalledVersion != "2.0" {
+		t.Fatalf("terminal result changed: %#v", h[0])
+	}
+}
+
+func TestMaximumSyncResponseFitsFirmwareLimit(t *testing.T) {
+	s, _ := newStore(t, nil)
+	id := testID('a')
+	register(t, s, id, "boot", "home_favorites", "backlight_brightness", "network", "ota_install")
+	v, _ := s.View(id, nil)
+	v.Settings.Screen.Name = strings.Repeat(`"`, 64)
+	v.Settings.Screen.City = strings.Repeat(`"`, 64)
+	day, night := 100, 10
+	v.Settings.Screen.BacklightPercent = &day
+	v.Settings.Screen.NightAction = "dim"
+	v.Settings.Screen.NightBacklightPercent = &night
+	home := v.Settings.Services["home"]
+	for i := 0; i < 4; i++ {
+		entity := "light." + strings.Repeat("x", 40) + strconv.Itoa(i)
+		home.Lights = append(home.Lights, entity)
+		home.Favorites = append(home.Favorites, Favorite{EntityID: entity, Kind: "light", Label: strings.Repeat(`"`, 32)})
+	}
+	v.Settings.Services["home"] = home
+	// Exercise the maximum-length persisted endpoint and album in the response.
+	connections := s.ConnectionsView()
+	connections.Connections.Immich.BaseURL = "https://example.test/" + strings.Repeat("a", 512-len("https://example.test/"))
+	if err := s.UpdateConnections(connections.Revision, ConnectionPatch{Connections: connections.Connections}); err != nil {
+		t.Fatal(err)
+	}
+	v2, _ := s.View(id, nil)
+	v.Settings.Photos.BaseURL = v2.Settings.Photos.BaseURL
+	v.Settings.Photos.AlbumID = strings.Repeat(`"`, 64)
+	v.Settings.Network.BridgeURL = "https://example.test/" + strings.Repeat("b", 127-len("https://example.test/"))
+	ssid := strings.Repeat(`"`, 32)
+	password := strings.Repeat(`"`, 64)
+	key := strings.Repeat(`"`, 63)
+	if err := s.Update(id, v2.Revision, Patch{Settings: v.Settings, NetworkCredentials: map[string]*string{"wifi_ssid": &ssid, "wifi_password": &password, "bridge_key": &key}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EnqueueOptions(id, "ota_install", true, nil, strings.Repeat("v", 32)); err != nil {
+		t.Fatal(err)
+	}
+	response, err := s.Sync(report(s, id, "boot", "home_favorites", "backlight_brightness", "network", "ota_install"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Preferences.Home.Favorites) != 4 || len(response.Preferences.Network) != 4 || response.Command == nil {
+		t.Fatal("test did not exercise the full response")
+	}
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) > 8192 {
+		t.Fatalf("sync response %d bytes exceeds firmware 8192 byte limit", len(encoded))
+	}
+	t.Logf("maximum sync response: %d bytes", len(encoded))
+}

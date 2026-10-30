@@ -8,6 +8,9 @@ export type ScreenSettings = {
   night_enabled: boolean;
   night_start: string;
   night_end: string;
+  backlight_percent?: number;
+  night_action?: "off" | "dim";
+  night_backlight_percent?: number;
   auto_update_check: boolean;
   auto_install: boolean;
 };
@@ -25,6 +28,9 @@ export type PhotoSettings = {
   layout: "adaptive" | "contain" | "cover";
   crop_limit_percent: number;
 };
+export type Favorite = { entity_id: string; kind: "light" | "climate"; label?: string };
+export type CatalogItem = { id: string; name: string; asset_count?: number; provider?: string; time_zone?: string; color?: string; read_only?: boolean };
+export type Catalog = { items: CatalogItem[]; complete: boolean };
 export type ServiceSettings = {
   weather: {
     enabled: boolean;
@@ -53,6 +59,7 @@ export type ServiceSettings = {
     sensors: string[];
     lights: string[];
     climates: string[];
+    favorites?: Favorite[];
   };
 };
 export type Settings = {
@@ -107,6 +114,8 @@ export type Device = {
   width?: number;
   height?: number;
   ota_progress?: number;
+  backlight_percent?: number;
+  backlight_error?: string;
 };
 export type Command = {
   id: string;
@@ -147,7 +156,7 @@ export type UpdateInfo = {
   available_version: string;
   update_available: boolean;
   device_connected: boolean;
-  history?: { version: string; state: string; at?: string }[];
+  history?: { id: string; version: string; previous_version?: string; installed_version?: string; state: "queued" | "accepted" | "succeeded" | "failed" | "unknown"; at: string; updated_at?: string; stage?: string; error?: string }[];
 };
 
 export const SECTION_LIST = [

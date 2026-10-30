@@ -24,7 +24,7 @@ func NewLights(baseURL, token string, lights []string, client *http.Client, ttl 
 	return &LightsFetcher{baseURL: baseURL, token: token, lights: lights, client: client, ttl: ttl}
 }
 
-func (f *LightsFetcher) Name() string      { return "lights" }
+func (f *LightsFetcher) Name() string       { return "lights" }
 func (f *LightsFetcher) TTL() time.Duration { return f.ttl }
 
 func (f *LightsFetcher) Fetch(ctx context.Context) (json.RawMessage, error) {
@@ -99,6 +99,12 @@ func (f *LightsFetcher) fetchLight(ctx context.Context, entityID string) (model.
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&state); err != nil {
 		return model.LightItem{}, err
+	}
+
+	// Only actual on/off states are actionable; unknown and unavailable must not
+	// appear as switched-off lights on the display.
+	if state.State != "on" && state.State != "off" {
+		return model.LightItem{}, fmt.Errorf("light state unavailable")
 	}
 
 	br := 0

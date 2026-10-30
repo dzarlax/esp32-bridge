@@ -72,6 +72,9 @@ func (v Values) Validate() error {
 			return errors.New("invalid night schedule")
 		}
 	}
+	if v.Screen.BacklightPercent != nil && (*v.Screen.BacklightPercent < 10 || *v.Screen.BacklightPercent > 100) || v.Screen.NightBacklightPercent != nil && (*v.Screen.NightBacklightPercent < 10 || *v.Screen.NightBacklightPercent > 100) || (v.Screen.NightAction != "" && v.Screen.NightAction != "off" && v.Screen.NightAction != "dim") || (v.Screen.NightAction == "dim" && (v.Screen.BacklightPercent == nil || v.Screen.NightBacklightPercent == nil)) {
+		return errors.New("invalid brightness settings")
+	}
 	p := v.Photos
 	if p.IdleSeconds < 30 || p.IdleSeconds > 3600 || p.IntervalSeconds < 15 || p.IntervalSeconds > 3600 || p.CropLimitPercent < 0 || p.CropLimitPercent > 40 {
 		return errors.New("photo timing or crop limit out of range")
@@ -107,6 +110,19 @@ func (v Values) Validate() error {
 		}
 		if !ok || !validURL(s.BaseURL) || !validIDsWithLength(s.IDs, 32, idLength) || !validIDs(s.Sensors, 10) || !validIDs(s.Lights, 8) || !validIDs(s.Climates, 1) {
 			return fmt.Errorf("invalid %s settings", name)
+		}
+		if name != "home" && len(s.Favorites) != 0 {
+			return errors.New("favorites only allowed for home")
+		}
+		if len(s.Favorites) > 4 {
+			return errors.New("too many favorites")
+		}
+		seen := map[string]bool{}
+		for _, f := range s.Favorites {
+			if f.EntityID == "" || !cleanText(f.EntityID, 47) || !cleanText(f.Label, 32) || (f.Kind != "light" && f.Kind != "climate") || !strings.HasPrefix(f.EntityID, f.Kind+".") || seen[f.EntityID] {
+				return errors.New("invalid favorite")
+			}
+			seen[f.EntityID] = true
 		}
 		if len(s.Timezone) > 64 || !cleanText(s.Timezone, 64) {
 			return fmt.Errorf("invalid %s timezone", name)
@@ -170,12 +186,12 @@ func validCommand(c *Command) bool {
 		return false
 	}
 	switch c.Action {
-	case "photo_start", "restart", "ota_check", "ota_install", "reset":
+	case "photo_start", "restart", "ota_check", "ota_install", "reset", "backlight_preview", "backlight_restore":
 	default:
 		return false
 	}
 	switch c.State {
-	case "queued", "accepted", "succeeded", "failed", "expired", "interrupted":
+	case "queued", "accepted", "succeeded", "failed", "expired", "interrupted", "unknown":
 	default:
 		return false
 	}
@@ -187,6 +203,16 @@ func validCommand(c *Command) bool {
 		maxAge = 10 * time.Minute
 	}
 	if c.ExpiresAt.Sub(c.CreatedAt) > maxAge+time.Second {
+		return false
+	}
+	if c.Action == "backlight_preview" {
+		if c.Percent == nil || *c.Percent < 10 || *c.Percent > 100 {
+			return false
+		}
+	} else if c.Percent != nil {
+		return false
+	}
+	if !cleanText(c.TargetVersion, 32) || (c.Action != "ota_install" && c.TargetVersion != "") {
 		return false
 	}
 	return c.Error == "" || safeError(c.Error) == c.Error

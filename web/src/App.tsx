@@ -488,7 +488,7 @@ function AppContent() {
     }
   }
 
-  async function doAction(action: Ask["action"]) {
+  async function doAction(action: Ask["action"], percent?: number) {
     const deviceId = selectedDeviceRef.current;
     if (!envelope || !deviceId || busy) return;
     if (!canRun(envelope.device, action)) { setAlert({ kind: "error", text: "Устройство не в сети или не сообщило поддержку этой команды." }); return; }
@@ -496,7 +496,7 @@ function AppContent() {
     setBusy(true);
     setAlert(null);
     try {
-      const result = await api.action(deviceId, action);
+      const result = await api.action(deviceId, action, percent);
       if (selectedDeviceRef.current !== deviceId || selectionEpoch.current !== epoch) return;
       setCommand(result.command);
       setConfirm(null);

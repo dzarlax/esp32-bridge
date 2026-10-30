@@ -1,3 +1,5 @@
+import { CatalogPicker } from "./catalog-picker";
+import type { Favorite } from "./types";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import type { Settings } from "./types";
@@ -134,16 +136,12 @@ function ServiceEditor({
             value={item.base_url}
             onEdit={props.onOpenConnections}
           />
-          <Field
-            label={t("Календари")}
-            help={t("ID календарей, по одному на строку или через запятую.")}
-          >
-            <textarea
-              rows={3}
-              value={item.ids.join("\n")}
-              onChange={(e) => list("ids", e.target.value)}
-            />
+          <Field label={t("Календари")}>
+            <CatalogPicker deviceId={props.deviceId} kind="calendars" selected={item.ids} onChange={(ids) => update("ids", ids)} />
           </Field>
+          <details><summary>{t("Дополнительно: ID вручную")}</summary>
+            <Field label={t("Календари")} help={t("ID календарей, по одному на строку или через запятую.")}><textarea rows={3} value={item.ids.join("\n")} onChange={(e) => list("ids", e.target.value)} /></Field>
+          </details>
           <Field label={t("Часовой пояс")}>
             <Timezone
               label={t("Часовой пояс календаря")}
@@ -223,6 +221,7 @@ function ServiceEditor({
             value={item.base_url}
             onEdit={props.onOpenConnections}
           />
+          <FavoritesEditor home={draft.services.home} supported={envelope.device.capabilities.includes("home_favorites")} onChange={(favorites) => update("favorites", favorites)} />
           {(["sensors", "lights", "climates"] as const).map((field) => (
             <Field
               key={field}
@@ -244,6 +243,24 @@ function ServiceEditor({
       )}
     </div>
   );
+}
+
+function FavoritesEditor({ home, supported, onChange }: { home: Settings["services"]["home"]; supported: boolean; onChange: (value: Favorite[]) => void }) {
+  const t = useT();
+  const favorites = home.favorites ?? [];
+  const choices = [...home.lights.map((entity_id) => ({ entity_id, kind: "light" as const })), ...home.climates.map((entity_id) => ({ entity_id, kind: "climate" as const }))].filter((entry) => !favorites.some((favorite) => favorite.entity_id === entry.entity_id));
+  const move = (index: number, offset: number) => { const next = [...favorites]; const target = index + offset; if (target < 0 || target >= next.length) return; [next[index], next[target]] = [next[target]!, next[index]!]; onChange(next); };
+  return <div className="favorites-editor"><strong>{t("Избранное на главном экране")}</strong><p className="field-note">{t("До четырёх настроенных источников света или климата. Порядок задаётся кнопками.")}</p>
+    {!supported && <p>{t("Эта прошивка не поддерживает избранное.")}</p>}
+    {favorites.map((favorite, index) => { const available = (favorite.kind === "light" ? home.lights : home.climates).includes(favorite.entity_id); return <div className="favorite-item" key={favorite.entity_id}>
+      <span>{favorite.entity_id} { !available && <small>— {t("Недоступен в настройках")}</small>}</span>
+      <input aria-label={`${t("Подпись")} ${favorite.entity_id}`} value={favorite.label ?? ""} disabled={!supported || !available} onChange={(e) => { const next = [...favorites]; const label = e.target.value; if (new TextEncoder().encode(label).length > 32 || /[\x00-\x1f\x7f]/.test(label)) return; next[index] = { ...favorite, label }; onChange(next); }} />
+      <button type="button" disabled={!supported || index === 0} aria-label={`${t("Переместить выше")} ${favorite.entity_id}`} onClick={() => move(index, -1)}>↑</button>
+      <button type="button" disabled={!supported || index === favorites.length - 1} aria-label={`${t("Переместить ниже")} ${favorite.entity_id}`} onClick={() => move(index, 1)}>↓</button>
+      <button type="button" disabled={!supported} onClick={() => onChange(favorites.filter((_, i) => i !== index))}>{t("Удалить")}</button>
+    </div>; })}
+    <select aria-label={t("Добавить в избранное")} disabled={!supported || favorites.length >= 4 || !choices.length} value="" onChange={(e) => { const choice = choices.find((entry) => entry.entity_id === e.target.value); if (choice && new TextEncoder().encode(choice.entity_id).length <= 47) onChange([...favorites, choice]); }}><option value="">{t("Добавить в избранное")}</option>{choices.map((entry) => <option key={entry.entity_id} value={entry.entity_id}>{entry.entity_id}</option>)}</select>
+  </div>;
 }
 
 function Timezone({

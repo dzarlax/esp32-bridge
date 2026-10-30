@@ -35,10 +35,11 @@ var (
 type Prepare func(map[string]Values, map[string]string) (commit func(), abort func(), err error)
 
 type profileState struct {
-	Revision uint64            `json:"revision"`
-	Settings Values            `json:"settings"`
-	Network  map[string]string `json:"network,omitempty"`
-	Command  *Command          `json:"command,omitempty"`
+	Revision   uint64            `json:"revision"`
+	Settings   Values            `json:"settings"`
+	Network    map[string]string `json:"network,omitempty"`
+	Command    *Command          `json:"command,omitempty"`
+	OTAHistory []OTAAttempt      `json:"ota_history,omitempty"`
 }
 
 type archivedPending struct {
@@ -265,6 +266,16 @@ func (s *Store) validateState(st diskState) error {
 		if !sameSharedURLs(profile.Settings, st.Connections) {
 			return ErrSharedURLMismatch
 		}
+		if len(profile.OTAHistory) > 100 {
+			return errors.New("invalid OTA history")
+		}
+		seenHistory := map[string]bool{}
+		for _, h := range profile.OTAHistory {
+			if !validCommandID(h.ID) || seenHistory[h.ID] || !cleanText(h.Version, 32) || !cleanText(h.PreviousVersion, 32) || !cleanText(h.InstalledVersion, 32) || h.At.IsZero() || !slices.Contains([]string{"queued", "accepted", "succeeded", "failed", "unknown"}, h.State) || (h.Stage != "" && !slices.Contains([]string{"checking", "downloading", "verifying", "writing", "rebooting"}, h.Stage)) || (h.Error != "" && !slices.Contains([]string{"ota_check_failed", "no_update", "download_failed", "validation_failed", "flash_failed", "device_error", "unknown"}, h.Error)) {
+				return errors.New("invalid OTA history")
+			}
+			seenHistory[h.ID] = true
+		}
 		if err := validateStoredState(nil, profile.Network, profile.Command); err != nil {
 			return errors.New("invalid device state")
 		}
@@ -437,6 +448,22 @@ func (s *Store) Update(id string, revision uint64, p Patch) error {
 	if p.Settings.Screen.Locale != profile.Settings.Screen.Locale && !slices.Contains(s.devices[id].Capabilities, "locale") {
 		return ErrUnavailable
 	}
+	oldHome, newHome := profile.Settings.Services["home"], p.Settings.Services["home"]
+	if !slices.Equal(oldHome.Favorites, newHome.Favorites) && !slices.Contains(s.devices[id].Capabilities, "home_favorites") {
+		return ErrUnavailable
+	}
+	for _, f := range newHome.Favorites {
+		allowed := newHome.Lights
+		if f.Kind == "climate" {
+			allowed = newHome.Climates
+		}
+		if !slices.Contains(allowed, f.EntityID) && !slices.Contains(oldHome.Favorites, f) {
+			return errors.New("favorite not configured")
+		}
+	}
+	if (!equalIntPtr(p.Settings.Screen.BacklightPercent, profile.Settings.Screen.BacklightPercent) || !equalIntPtr(p.Settings.Screen.NightBacklightPercent, profile.Settings.Screen.NightBacklightPercent) || p.Settings.Screen.NightAction != profile.Settings.Screen.NightAction) && !slices.Contains(s.devices[id].Capabilities, "backlight_brightness") {
+		return ErrUnavailable
+	}
 	if !sameSharedURLs(p.Settings, s.state.Connections) {
 		return ErrSharedURLMismatch
 	}
@@ -545,7 +572,14 @@ func (s *Store) Devices() DevicesList {
 
 // Legacy firmware only renders Russian. Never project a matching revision as
 // applied when the reported renderer does not match the desired language.
+func equalIntPtr(a, b *int) bool { return a == nil && b == nil || a != nil && b != nil && *a == *b }
 func appliedRevision(d Device, p profileState) uint64 {
+	if len(p.Settings.Services["home"].Favorites) > 0 && !slices.Contains(d.Capabilities, "home_favorites") {
+		return 0
+	}
+	if (p.Settings.Screen.BacklightPercent != nil || p.Settings.Screen.NightBacklightPercent != nil || p.Settings.Screen.NightAction == "dim") && !slices.Contains(d.Capabilities, "backlight_brightness") {
+		return 0
+	}
 	matches := d.AppliedLocale == p.Settings.Screen.Locale && slices.Contains(d.Capabilities, "locale")
 	if !slices.Contains(d.Capabilities, "locale") {
 		matches = p.Settings.Screen.Locale == "ru"
@@ -587,7 +621,7 @@ func (s *Store) View(id string, statuses map[string]Status) (Envelope, error) {
 		DeviceID: id, Revision: profile.Revision, Settings: settings,
 		SecretsPresent: secretPresence(s.effectiveSecrets(s.state)),
 		Device:         DeviceView{Device: device, Command: clone(profile.Command)},
-		Statuses:       clone(statuses), Capabilities: map[string]any{"brightness": false, "google_photos": false, "locales": []string{"ru", "en", "sr-Latn"}, "timezones": []string{"Europe/Belgrade", "UTC"}},
+		Statuses:       clone(statuses), Capabilities: map[string]any{"brightness": slices.Contains(device.Capabilities, "backlight_brightness"), "google_photos": false, "locales": []string{"ru", "en", "sr-Latn"}, "timezones": []string{"Europe/Belgrade", "UTC"}},
 	}, nil
 }
 
@@ -741,6 +775,21 @@ func disableRemovedSelections(st *diskState, removed disconnectSet) {
 }
 
 func (s *Store) Sync(d Device) (SyncResponse, error) {
+	if d.BacklightPercent != nil && (*d.BacklightPercent < 0 || *d.BacklightPercent > 100) {
+		return SyncResponse{}, errors.New("invalid backlight")
+	}
+	if d.BacklightError != "" && !slices.Contains([]string{"unsupported", "unavailable", "read_failed", "write_failed", "uncalibrated", "unknown"}, d.BacklightError) {
+		return SyncResponse{}, errors.New("invalid backlight error")
+	}
+	if d.OTAAttemptID != "" && !validCommandID(d.OTAAttemptID) {
+		return SyncResponse{}, errors.New("invalid OTA attempt")
+	}
+	if d.OTAStage != "" && !slices.Contains([]string{"checking", "downloading", "verifying", "writing", "rebooting"}, d.OTAStage) {
+		return SyncResponse{}, errors.New("invalid OTA stage")
+	}
+	if d.OTAError != "" && !slices.Contains([]string{"ota_check_failed", "no_update", "download_failed", "validation_failed", "flash_failed", "device_error", "unknown"}, d.OTAError) {
+		return SyncResponse{}, errors.New("invalid OTA error")
+	}
 	if d.AppliedLocale != "" && !validLocale(d.AppliedLocale) {
 		return SyncResponse{}, errors.New("invalid applied locale")
 	}
@@ -805,6 +854,61 @@ func (s *Store) Sync(d Device) (SyncResponse, error) {
 			}
 		}
 	}
+	if scopeMatches && profile.Command != nil && profile.Command.Action == "ota_install" && profile.Command.State == "succeeded" && profile.Command.TargetVersion != "" && profile.Command.TargetVersion != d.Firmware {
+		profile.Command.State = "unknown"
+		profile.Command.Error = ""
+		changed = true
+	}
+	if scopeMatches {
+		now := time.Now().UTC()
+		for i := range profile.OTAHistory {
+			h := &profile.OTAHistory[i]
+			prior := *h
+			if profile.Command != nil && profile.Command.ID == h.ID {
+				switch profile.Command.State {
+				case "accepted":
+					if h.State == "queued" {
+						h.State = "accepted"
+					}
+				case "expired", "interrupted":
+					if h.State != "succeeded" && h.State != "failed" {
+						h.State = "unknown"
+					}
+				}
+			}
+			if d.CommandResult != nil && d.CommandResult.ID == h.ID && h.State != "succeeded" && h.State != "failed" {
+				switch d.CommandResult.State {
+				case "accepted":
+					if h.State == "queued" {
+						h.State = "accepted"
+					}
+				case "succeeded":
+					if h.Version == "" || h.Version == d.Firmware {
+						h.State = "succeeded"
+						h.InstalledVersion = d.Firmware
+						h.Error = ""
+					} else {
+						h.State = "unknown"
+					}
+				case "failed":
+					h.State = "failed"
+					h.Error = "device_error"
+				}
+			}
+			if d.OTAAttemptID == h.ID && h.State != "succeeded" && (h.State != "failed" || prior.State != "failed") {
+				if d.OTAStage != "" {
+					h.Stage = d.OTAStage
+				}
+				if d.OTAError != "" && h.State == "failed" {
+					h.Error = d.OTAError
+				}
+			}
+			if *h != prior {
+				h.UpdatedAt = &now
+				changed = true
+			}
+		}
+	}
 	if scopeMatches && d.AppliedRevision == profile.Revision && slices.Contains(d.Capabilities, "network") && len(profile.Network) > 0 {
 		profile.Network = nil
 		changed = true
@@ -850,7 +954,7 @@ func (s *Store) Sync(d Device) (SyncResponse, error) {
 	}
 	response := SyncResponse{
 		DeviceID: d.DeviceID, BridgeID: s.state.BridgeID, Revision: profile.Revision,
-		Preferences: Preferences{Screen: values.Screen, Photos: values.Photos, Visible: visible, POSIXTimezone: tz, SettingsURL: s.baseURL + "/settings/?device_id=" + d.DeviceID},
+		Preferences: Preferences{Screen: values.Screen, Home: HomePreferences{Favorites: append([]Favorite{}, values.Services["home"].Favorites...)}, Photos: values.Photos, Visible: visible, POSIXTimezone: tz, SettingsURL: s.baseURL + "/settings/?device_id=" + d.DeviceID},
 	}
 	if (!scopeMatches || d.AppliedRevision != profile.Revision) && slices.Contains(d.Capabilities, "network") && len(profile.Network) > 0 {
 		response.Preferences.Network = clone(profile.Network)
@@ -862,11 +966,24 @@ func (s *Store) Sync(d Device) (SyncResponse, error) {
 }
 
 func (s *Store) Enqueue(id, action string, confirm bool) (*Command, error) {
+	return s.EnqueueOptions(id, action, confirm, nil, "")
+}
+func (s *Store) EnqueueOptions(id, action string, confirm bool, percent *int, targetVersion string) (*Command, error) {
+	if action == "backlight_preview" {
+		if percent == nil || *percent < 10 || *percent > 100 {
+			return nil, errors.New("invalid percent")
+		}
+	} else if percent != nil {
+		return nil, errors.New("unexpected percent")
+	}
+	if !cleanText(targetVersion, 32) || (action != "ota_install" && targetVersion != "") {
+		return nil, errors.New("invalid target version")
+	}
 	if !validBridgeID(id) {
 		return nil, ErrDeviceNotFound
 	}
 	switch action {
-	case "photo_start", "ota_check":
+	case "photo_start", "ota_check", "backlight_preview", "backlight_restore":
 	case "restart", "ota_install", "reset":
 		if !confirm {
 			return nil, errors.New("confirmation required")
@@ -880,12 +997,22 @@ func (s *Store) Enqueue(id, action string, confirm bool) (*Command, error) {
 	if !ok {
 		return nil, ErrDeviceNotFound
 	}
+	profile = clone(profile)
 	device := s.devices[id]
 	if !s.online(device) || !slices.Contains(device.Capabilities, action) {
 		return nil, ErrUnavailable
 	}
 	if c := profile.Command; c != nil && (c.State == "queued" || c.State == "accepted") && time.Now().Before(c.ExpiresAt) {
 		return nil, ErrBusy
+	}
+	if c := profile.Command; c != nil && c.Action == "ota_install" && (c.State == "queued" || c.State == "accepted") && time.Now().After(c.ExpiresAt) {
+		for i := range profile.OTAHistory {
+			if profile.OTAHistory[i].ID == c.ID {
+				now := time.Now().UTC()
+				profile.OTAHistory[i].State = "unknown"
+				profile.OTAHistory[i].UpdatedAt = &now
+			}
+		}
 	}
 	var raw [16]byte
 	if _, err := rand.Read(raw[:]); err != nil {
@@ -896,7 +1023,13 @@ func (s *Store) Enqueue(id, action string, confirm bool) (*Command, error) {
 	if action == "ota_install" {
 		timeout = 10 * time.Minute
 	}
-	profile.Command = &Command{ID: hex.EncodeToString(raw[:]), Action: action, State: "queued", CreatedAt: now, ExpiresAt: now.Add(timeout), BootID: device.BootID}
+	profile.Command = &Command{ID: hex.EncodeToString(raw[:]), Action: action, State: "queued", CreatedAt: now, ExpiresAt: now.Add(timeout), BootID: device.BootID, Percent: percent, TargetVersion: targetVersion}
+	if action == "ota_install" {
+		profile.OTAHistory = append(profile.OTAHistory, OTAAttempt{ID: profile.Command.ID, Version: targetVersion, PreviousVersion: device.Firmware, State: "queued", At: now})
+		if len(profile.OTAHistory) > 100 {
+			profile.OTAHistory = profile.OTAHistory[len(profile.OTAHistory)-100:]
+		}
+	}
 	next := clone(s.state)
 	next.Profiles[id] = profile
 	if err := s.persist(next); err != nil {
@@ -904,4 +1037,38 @@ func (s *Store) Enqueue(id, action string, confirm bool) (*Command, error) {
 	}
 	s.state = next
 	return clone(profile.Command), nil
+}
+
+// OTAHistory returns a newest-first copy of the persisted attempt history.
+func (s *Store) OTAHistory(id string) ([]OTAAttempt, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, ok := s.state.Profiles[id]
+	if !ok {
+		return nil, ErrDeviceNotFound
+	}
+	if c := p.Command; c != nil && c.Action == "ota_install" && (c.State == "queued" || c.State == "accepted") && time.Now().After(c.ExpiresAt) {
+		next := clone(s.state)
+		p = next.Profiles[id]
+		for i := range p.OTAHistory {
+			if p.OTAHistory[i].ID == c.ID {
+				now := time.Now().UTC()
+				p.OTAHistory[i].State = "unknown"
+				p.OTAHistory[i].UpdatedAt = &now
+			}
+		}
+		p.Command.State = "expired"
+		p.Command.Error = "expired"
+		next.Profiles[id] = p
+		if err := s.persist(next); err != nil {
+			return nil, err
+		}
+		s.state = next
+	}
+	result := clone(p.OTAHistory)
+	slices.Reverse(result)
+	if result == nil {
+		result = []OTAAttempt{}
+	}
+	return result, nil
 }

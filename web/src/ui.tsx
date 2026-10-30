@@ -6,7 +6,7 @@ import { useT } from "./i18n";
 export type Ask = {
   title: string;
   description: string;
-  action: "photo_start" | "restart" | "ota_check" | "ota_install" | "reset";
+  action: "photo_start" | "restart" | "ota_check" | "ota_install" | "reset" | "backlight_preview" | "backlight_restore";
   danger?: boolean;
 };
 export const tzLabel = (tz: string, t: (message: string) => string) => (tz === "Europe/Belgrade" ? t("Белград") : tz);
