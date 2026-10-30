@@ -368,6 +368,7 @@ type calendarPlatformEventTime struct {
 }
 
 type calendarPlatformEvent struct {
+	partial    bool
 	ID         string                    `json:"id"`
 	CalendarID string                    `json:"calendar_id"`
 	Title      string                    `json:"title"`
@@ -404,6 +405,11 @@ func (h *Handler) fetchCalendarPlatformRaw(r *http.Request, dayStart, dayEnd tim
 	var payload struct {
 		Items    []calendarPlatformEvent `json:"items"`
 		Complete bool                    `json:"complete"`
+		Sources  []struct {
+			CalendarID string `json:"calendar_id"`
+			Status     string `json:"status"`
+			Stale      *bool  `json:"stale"`
+		} `json:"sources"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload); err != nil {
 		return nil, err
@@ -412,7 +418,23 @@ func (h *Handler) fetchCalendarPlatformRaw(r *http.Request, dayStart, dayEnd tim
 		log.Printf("[calendar] Calendar Platform returned a partial result")
 	}
 	if strict && !payload.Complete {
-		return nil, fmt.Errorf("calendar source incomplete")
+		ready := map[string]bool{}
+		for _, source := range payload.Sources {
+			if source.Status == "ready" && source.Stale != nil && !*source.Stale {
+				ready[source.CalendarID] = true
+			}
+		}
+		if len(ready) == 0 {
+			return nil, fmt.Errorf("calendar source incomplete")
+		}
+		items := make([]calendarPlatformEvent, 0, len(payload.Items))
+		for _, item := range payload.Items {
+			if ready[item.CalendarID] {
+				item.partial = true
+				items = append(items, item)
+			}
+		}
+		return items, nil
 	}
 	return payload.Items, nil
 }

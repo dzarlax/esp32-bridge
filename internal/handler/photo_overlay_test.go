@@ -243,3 +243,32 @@ func TestPhotoOverlayResetsWriteDeadline(t *testing.T) {
 		t.Fatalf("status=%d reset=%t deadline=%v", w.Code, w.reset, w.deadline)
 	}
 }
+
+func TestPhotoPartialCalendarKeepsFreshSources(t *testing.T) {
+	now := time.Now().UTC()
+	mode := "ready"
+	client := &http.Client{Transport: overlayTransport(func(r *http.Request) (*http.Response, error) {
+		body := fmt.Sprintf(`{"complete":false,"sources":[{"calendar_id":"a","status":%q,"stale":false},{"calendar_id":"b","status":"parked","stale":true},{"calendar_id":"c","status":"ready","stale":true}],"items":[{"id":"fresh","calendar_id":"a","title":"Fresh","start":{"date_time":%q},"end":{"date_time":%q}},{"id":"parked","calendar_id":"b","title":"Parked","start":{"date_time":%q},"end":{"date_time":%q}},{"id":"stale","calendar_id":"c","title":"Stale","start":{"date_time":%q},"end":{"date_time":%q}}]}`, mode, now.Add(time.Hour).Format(time.RFC3339), now.Add(2*time.Hour).Format(time.RFC3339), now.Add(time.Minute).Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339), now.Add(2*time.Minute).Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339))
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
+	})}
+	h := New(nil, "", "", "", nil, nil, client)
+	h.SetCalendarPlatform("https://calendar.test", "token", []string{"a", "b", "c"}, "UTC")
+	req := httptest.NewRequest("GET", "/", nil)
+	event, err := h.nextPhotoEvent(req, now)
+	if err != nil || event == nil || event.id != "fresh" || !event.partial {
+		t.Fatalf("fresh partial event lost: %+v %v", event, err)
+	}
+	for _, locale := range []string{"ru", "en", "sr-Latn"} {
+		screen := settings.Screen{Locale: locale, Timezone: "UTC", ClockFormat: "24h"}
+		partial := renderEvent(*event, screen, now)
+		full := *event
+		full.partial = false
+		if string(partial) == string(renderEvent(full, screen, now)) {
+			t.Fatalf("missing partial-result caption for %s", locale)
+		}
+	}
+	mode = "syncing"
+	if _, err := h.nextPhotoEvent(req, now); err == nil {
+		t.Fatal("no fresh sources mistaken for empty calendar")
+	}
+}
