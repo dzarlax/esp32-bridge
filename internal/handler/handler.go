@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -181,7 +182,9 @@ func (h *Handler) HAAction(w http.ResponseWriter, r *http.Request) {
 
 	bodyJSON, _ := json.Marshal(body)
 	haURL := fmt.Sprintf("%s/api/services/%s/%s", h.haBaseURL, domain, service)
-	haReq, err := http.NewRequestWithContext(r.Context(), "POST", haURL, strings.NewReader(string(bodyJSON)))
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	haReq, err := http.NewRequestWithContext(ctx, "POST", haURL, strings.NewReader(string(bodyJSON)))
 	if err != nil {
 		http.Error(w, `{"error":"failed to create request"}`, http.StatusInternalServerError)
 		return
@@ -191,32 +194,42 @@ func (h *Handler) HAAction(w http.ResponseWriter, r *http.Request) {
 
 	haResp, err := h.haClient.Do(haReq)
 	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusBadGateway)
+		code := "upstream_unavailable"
+		if ctx.Err() != nil {
+			code = "timeout"
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": code, "action_result": map[string]string{"state": "unknown", "error": code}})
 		return
 	}
 	defer haResp.Body.Close()
-
 	if h.orch != nil {
 		h.orch.Invalidate(cacheKey)
 	}
-
 	w.Header().Set("Content-Type", "application/json")
-	if haResp.StatusCode == 200 {
-		// Fetch fresh state after a successful action.
-		time.Sleep(200 * time.Millisecond)
-		var data json.RawMessage
-		if h.orch != nil {
-			data = h.orch.FetchOne(cacheKey)
+	if haResp.StatusCode == http.StatusOK {
+		result := map[string]any{"ok": true, "action_result": map[string]string{"state": "accepted"}}
+		if o, _ := h.readObservation(ctx, req.EntityID, domain); o != nil {
+			result["observation"] = o
 		}
-		if data != nil {
-			fmt.Fprintf(w, `{"ok":true,"%s":%s}`, cacheKey, data)
-		} else {
-			fmt.Fprintf(w, `{"ok":true}`)
+		if h.orch != nil && ctx.Err() == nil {
+			if data := h.orch.FetchOneContext(ctx, cacheKey); data != nil {
+				result[cacheKey] = data
+			}
 		}
+		_ = json.NewEncoder(w).Encode(result)
 	} else {
-		respBody, _ := io.ReadAll(haResp.Body)
+		code := "upstream_unavailable"
+		if haResp.StatusCode == 401 || haResp.StatusCode == 403 {
+			code = "unauthorized"
+		}
+		state := "unknown"
+		if haResp.StatusCode >= 400 && haResp.StatusCode < 500 {
+			state = "rejected"
+		}
 		w.WriteHeader(haResp.StatusCode)
-		w.Write(respBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": code, "action_result": map[string]string{"state": state, "error": code}})
 	}
 }
 

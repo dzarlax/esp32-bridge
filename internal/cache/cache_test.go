@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"sync"
@@ -70,4 +71,24 @@ func TestPanicReleasesWaitersAndFailureCanRetry(t *testing.T) {
 	if e != nil || string(data) != "true" {
 		t.Fatal("retry failed")
 	}
+}
+
+func TestFetchContextCancelsCoalescedWait(t *testing.T) {
+	c := New()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _, _ = c.Fetch("key", time.Minute, func() (json.RawMessage, error) { close(started); <-release; return json.RawMessage(`true`), nil })
+	}()
+	<-started
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _, err := c.FetchContext(ctx, "key", time.Minute, func() (json.RawMessage, error) { t.Error("unexpected fetch"); return nil, nil })
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v", err)
+	}
+	close(release)
+	<-done
 }

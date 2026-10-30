@@ -562,11 +562,7 @@ export function NetworkPage({
   const t = useT();
   const change = (value: string) =>
     edit({ ...draft, network: { bridge_url: value } });
-  const applyStatus = appliedSettingsStatus(
-    envelope.device,
-    envelope.revision,
-    t,
-  );
+  const applyStatus = appliedSettingsStatus(envelope, t);
   return (
     <div className="content-narrow">
       <section className="settings-section">

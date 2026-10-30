@@ -187,6 +187,28 @@ p {
 .page-header p {
   margin: 0;
 }
+.apply-status-card {
+  margin: 14px 0 18px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid #c9dce0;
+  border-left: 4px solid #258c88;
+  border-radius: 10px;
+  background: #f5faf9;
+  color: var(--ink);
+}
+.apply-status-main { min-width: 0; }
+.apply-status-heading { display: flex; align-items: center; gap: 9px; }
+.apply-status-lines { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px 14px; margin-top: 5px; }
+.apply-status-lines small { flex-basis: 100%; color: var(--muted); line-height: 1.4; }
+.apply-bridge-status { color: #26706e; font-weight: 650; }
+.apply-device-status { color: var(--muted); }
+.apply-status-indicator { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 50%; background: #b3812d; }
+.apply-status-indicator.applied { background: #34835b; }
+.apply-check { flex: 0 0 auto; }
 .header-meta {
   display: flex;
   align-items: center;
@@ -1242,6 +1264,8 @@ input[aria-invalid="true"] {
   }
 }
 @media (max-width: 760px) {
+  .apply-status-card { align-items: flex-start; }
+  .apply-status-card .apply-check { align-self: center; }
   .sidebar {
     visibility: hidden;
     transform: translateX(-102%);
@@ -1526,6 +1550,10 @@ input[aria-invalid="true"] {
     align-items: flex-start;
     flex-direction: column;
   }
+}
+@media (max-width: 420px) {
+  .apply-status-card { flex-direction: column; gap: 10px; padding: 13px; }
+  .apply-status-card .apply-check { align-self: stretch; }
 }
 @media (max-width: 760px) {
   .service-sheet-backdrop {

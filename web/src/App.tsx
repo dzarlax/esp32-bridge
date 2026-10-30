@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AdminApi, isRevisionConflict } from "./api";
+import { AdminApi, ApiError, isRevisionConflict } from "./api";
 import { photoTimingError, type PhotoTiming } from "./validation";
 import { ConnectionsPage } from "./connections-page";
 import { ConfirmDialog, DevicePage, UpdatesPage } from "./device-pages";
@@ -23,6 +23,8 @@ import {
 } from "./types";
 import { canRun, Field, Icon, type Ask, StatusPill, TextInput } from "./ui";
 import { LanguageSelect, LocaleProvider, useT } from "./i18n";
+import { hasCurrentApplicationAck, sameSettings } from "./settings-apply-status";
+import { SettingsApplyStatusCard } from "./settings-apply-status-card";
 
 const api = new AdminApi();
 function Login({ session, onLogin }: { session: Session; onLogin: (session: Session) => void }) {
@@ -101,6 +103,30 @@ function AppContent() {
   const [networkEditing, setNetworkEditing] = useState(false);
   const [serviceDetail, setServiceDetail] = useState<keyof Settings["services"]>("weather");
   const [conflict, setConflict] = useState(false);
+  const formEditSequence = useRef(0);
+  const draftRef = useRef<Settings | null>(null);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "uncertain">("idle");
+  const [statusStale, setStatusStale] = useState(false);
+  const [checkingStatus, setCheckingStatus] = useState(false);
+  const pendingSinceRef = useRef(new Map<string, number>());
+  const saveStateRevisionRef = useRef<number | null>(null);
+  const ambiguousSaveRef = useRef<{
+    deviceId: string;
+    epoch: number;
+    baseRevision: number;
+    baseSettings: Settings;
+    sentSettings: Settings;
+    sentCredentials: boolean;
+  } | null>(null);
+
+  function observeApplication(envelope: Envelope) {
+    const key = `${envelope.device_id}:${envelope.revision}`;
+    for (const existing of pendingSinceRef.current.keys()) {
+      if (existing.startsWith(`${envelope.device_id}:`) && existing !== key) pendingSinceRef.current.delete(existing);
+    }
+    if (hasCurrentApplicationAck(envelope)) pendingSinceRef.current.delete(key);
+    else if (!pendingSinceRef.current.has(key)) pendingSinceRef.current.set(key, Date.now());
+  }
 
   const selectedProfile = useMemo(() => devices?.devices.find((device) => device.id === selectedDeviceId) ?? null, [devices, selectedDeviceId]);
   const current = SECTION_LIST.find((item) => item.id === section)!;
@@ -112,13 +138,24 @@ function AppContent() {
     const next = await api.settings(deviceId);
     if (sequence !== requestSequence.current || selectionEpoch.current !== epoch || selectedDeviceRef.current !== deviceId || next.device_id !== deviceId) return null;
     setEnvelope(next);
+    setStatusStale(false);
+    observeApplication(next);
+    if (!ambiguousSaveRef.current && saveStateRevisionRef.current !== null && next.revision !== saveStateRevisionRef.current) {
+      saveStateRevisionRef.current = null;
+      ambiguousSaveRef.current = null;
+      setSaveState("idle");
+    }
     setCommand(next.device.command);
+    if (ambiguousSaveRef.current?.deviceId === deviceId && ambiguousSaveRef.current.epoch === epoch) {
+      await reconcileAmbiguousSave(next, deviceId, epoch);
+    }
     if (!preserveDraft || !dirtyRef.current) {
-      setDraft(clone(next.settings));
+      const nextDraft = clone(next.settings);
+      draftRef.current = nextDraft;
+      setDraft(nextDraft);
       baseRevisionRef.current = next.revision;
       setConflict(false);
     } else if (baseRevisionRef.current !== null && next.revision !== baseRevisionRef.current) {
-      setDraft((current) => current ? mergeSharedProjection(current, next.settings) : current);
       setConflict(true);
     }
     return next;
@@ -147,9 +184,15 @@ function AppContent() {
       updateDeviceQuery(existingId);
       setEnvelope(null);
       setDraft(null);
+      draftRef.current = null;
       setDirty(false);
       dirtyRef.current = false;
       baseRevisionRef.current = null;
+      setSaveState("idle");
+      saveStateRevisionRef.current = null;
+      ambiguousSaveRef.current = null;
+      pendingSinceRef.current.clear();
+      setStatusStale(false);
       if (existingId) await loadDevice(existingId);
       else setEnvelope(null);
       return;
@@ -175,7 +218,10 @@ function AppContent() {
       void refreshDevicesAndSelect().catch(() => undefined);
       const currentId = selectedDeviceRef.current;
       if (currentId) {
-        void loadDevice(currentId, true).catch(() => undefined);
+        const currentEpoch = selectionEpoch.current;
+        void loadDevice(currentId, true).catch(() => {
+          if (selectedDeviceRef.current === currentId && selectionEpoch.current === currentEpoch) setStatusStale(true);
+        });
         void api.updates(currentId).then((result) => {
           if (selectedDeviceRef.current === currentId) setUpdates(result);
         }).catch(() => undefined);
@@ -202,8 +248,14 @@ function AppContent() {
       setSelectedDeviceId("");
       setEnvelope(null);
       setDraft(null);
+      draftRef.current = null;
       dirtyRef.current = false;
       setDirty(false);
+      setSaveState("idle");
+      saveStateRevisionRef.current = null;
+      ambiguousSaveRef.current = null;
+      pendingSinceRef.current.clear();
+      setStatusStale(false);
       setNetworkCredentials({});
       setConnections(null);
       setAlert({ kind: "info", text: "Сеанс завершён. Войдите снова." });
@@ -235,7 +287,9 @@ function AppContent() {
   }
 
   function clearProfileDraft() {
-    setDraft(envelope ? clone(envelope.settings) : null);
+    const nextDraft = envelope ? clone(envelope.settings) : null;
+    draftRef.current = nextDraft;
+    setDraft(nextDraft);
     baseRevisionRef.current = envelope?.revision ?? null;
     dirtyRef.current = false;
     setDirty(false);
@@ -261,11 +315,18 @@ function AppContent() {
     setEnvelope(null);
     setUpdates(null);
     setCommand(null);
+    setSaveState("idle");
+    saveStateRevisionRef.current = null;
+    ambiguousSaveRef.current = null;
+    pendingSinceRef.current.clear();
+    setStatusStale(false);
     setAlert(null);
     void loadDevice(deviceId).catch((reason) => setAlert({ kind: "error", text: reason instanceof Error ? reason.message : "Не удалось загрузить настройки дисплея" }));
   }
 
   function edit(next: Settings) {
+    formEditSequence.current++;
+    draftRef.current = next;
     setDraft(next);
     dirtyRef.current = true;
     setDirty(true);
@@ -284,40 +345,147 @@ function AppContent() {
       return validation.message;
     }
     const epoch = selectionEpoch.current;
+    const sentSettings = clone(draft);
+    const submittedEditSequence = formEditSequence.current;
+    const baseSettings = clone(envelope.settings);
+    const baseRevision = baseRevisionRef.current ?? envelope.revision;
+    const sentCredentials = Object.keys(networkCredentials).length > 0;
     setBusy(true);
+    setSaveState("saving");
     setAlert(null);
     try {
-      const result = await api.save(deviceId, draft, baseRevisionRef.current ?? envelope.revision, networkCredentials);
+      const result = await api.save(deviceId, sentSettings, baseRevision, networkCredentials);
       if (selectedDeviceRef.current !== deviceId || selectionEpoch.current !== epoch || result.device_id !== deviceId) return "Выбранный дисплей изменился; результат сохранения не применён к текущему экрану.";
+      requestSequence.current++;
       setEnvelope(result);
-      setDraft(clone(result.settings));
+      observeApplication(result);
+      const editedWhileSaving = formEditSequence.current !== submittedEditSequence;
+      if (!editedWhileSaving) {
+        const savedDraft = clone(result.settings);
+        draftRef.current = savedDraft;
+        setDraft(savedDraft);
+      }
       baseRevisionRef.current = result.revision;
-      dirtyRef.current = false;
-      setDirty(false);
-      setNetworkCredentials({});
-      setNetworkEditing(false);
+      saveStateRevisionRef.current = result.revision;
+      ambiguousSaveRef.current = null;
+      setSaveState("saved");
+      setStatusStale(false);
+      dirtyRef.current = editedWhileSaving;
+      setDirty(editedWhileSaving);
+      if (!editedWhileSaving) {
+        setNetworkCredentials({});
+        setNetworkEditing(false);
+      }
       setConflict(false);
-      setAlert({ kind: "success", text: "Изменения сохранены. Дисплей применит их при следующей синхронизации." });
+      setAlert({ kind: "success", text: editedWhileSaving
+        ? "Отправленные изменения сохранены. Более новые правки остались в черновике."
+        : "Изменения сохранены. Дисплей применит их при следующей синхронизации." });
       return null;
     } catch (reason) {
       if (selectedDeviceRef.current !== deviceId || selectionEpoch.current !== epoch) return "Выбранный дисплей изменился; результат запроса проигнорирован.";
+      const transportUnknown = (reason instanceof ApiError && (reason.status === 0 || reason.status === 502)) || (reason instanceof Error && reason.name === "AbortError");
+      if (transportUnknown) {
+        ambiguousSaveRef.current = { deviceId, epoch, baseRevision, baseSettings, sentSettings, sentCredentials };
+        setSaveState("uncertain");
+        const message = "Ответ на сохранение не получен. Черновик сохранён; проверьте статус перед повторной попыткой.";
+        setAlert({ kind: "info", text: message });
+        await checkApplicationStatus();
+        return message;
+      }
       if (isRevisionConflict(reason)) {
+        const conflictReadSequence = ++requestSequence.current;
         const latest = await api.settings(deviceId).catch(() => null);
-        if (latest && selectedDeviceRef.current === deviceId && selectionEpoch.current === epoch) {
+        if (latest && conflictReadSequence === requestSequence.current && selectedDeviceRef.current === deviceId && selectionEpoch.current === epoch) {
           setEnvelope(latest);
+          observeApplication(latest);
           setCommand(latest.device.command);
           baseRevisionRef.current = latest.revision;
-          setDraft((current) => current ? mergeSharedProjection(current, latest.settings) : current);
+          setDraft((current) => {
+            const merged = current ? mergeSharedProjection(current, latest.settings) : current;
+            draftRef.current = merged;
+            return merged;
+          });
         }
         setConflict(true);
-        const message = latest ? "Настройки изменились на сервере. Ваш черновик сохранён — сравните его с актуальными данными и повторите изменения." : "Настройки изменились на сервере. Не удалось загрузить актуальную версию.";
+        setSaveState("idle");
+        const message = latest && conflictReadSequence === requestSequence.current ? "Настройки изменились на сервере. Ваш черновик сохранён — сравните его с актуальными данными и повторите изменения." : "Настройки изменились на сервере. Не удалось загрузить актуальную версию.";
         setAlert({ kind: "error", text: message });
         return message;
       }
       const message = reason instanceof Error ? reason.message : "Сохранение не выполнено. Прежние настройки сохранены.";
+      setSaveState("idle");
       setAlert({ kind: "error", text: message });
       return message;
     } finally { setBusy(false); }
+  }
+
+  async function reconcileAmbiguousSave(latest: Envelope, deviceId: string, epoch: number) {
+    if (selectedDeviceRef.current !== deviceId || selectionEpoch.current !== epoch || latest.device_id !== deviceId) return;
+    const attempt = ambiguousSaveRef.current;
+    if (!attempt || attempt.deviceId !== deviceId || attempt.epoch !== epoch) return;
+    setEnvelope(latest);
+    observeApplication(latest);
+    setStatusStale(false);
+    setCommand(latest.device.command);
+    if (latest.revision > attempt.baseRevision && sameSettings(latest.settings, attempt.sentSettings)) {
+      baseRevisionRef.current = latest.revision;
+      setConflict(false);
+      const currentDraft = draftRef.current;
+      const draftMatchesSent = currentDraft !== null && sameSettings(currentDraft, attempt.sentSettings);
+      if (draftMatchesSent && !attempt.sentCredentials) {
+        const confirmedDraft = clone(latest.settings);
+        draftRef.current = confirmedDraft;
+        setDraft(confirmedDraft);
+        dirtyRef.current = false;
+        setDirty(false);
+      }
+      saveStateRevisionRef.current = latest.revision;
+      setSaveState(attempt.sentCredentials ? "uncertain" : "saved");
+      if (!attempt.sentCredentials) ambiguousSaveRef.current = null;
+      setAlert({ kind: "info", text: attempt.sentCredentials
+        ? "Настройки найдены в Bridge. Записанный ключ невозможно подтвердить через настройки."
+        : "Настройки найдены в Bridge. Дисплей подтвердит применение отдельно." });
+      return;
+    }
+    if (latest.revision === attempt.baseRevision && sameSettings(latest.settings, attempt.baseSettings)) {
+      // The PATCH may still be in flight and commit after this read. Keep the outcome uncertain.
+      return;
+    }
+    ambiguousSaveRef.current = null;
+    saveStateRevisionRef.current = null;
+    setConflict(true);
+    setSaveState("idle");
+    setAlert({ kind: "error", text: "Настройки в Bridge изменились после запроса. Ваш черновик сохранён; сравните его с актуальными данными." });
+  }
+
+  async function checkApplicationStatus() {
+    const deviceId = selectedDeviceRef.current;
+    const epoch = selectionEpoch.current;
+    if (!deviceId || checkingStatus) return;
+    setCheckingStatus(true);
+    try {
+      await loadDevice(deviceId, true);
+    } catch {
+      if (selectedDeviceRef.current === deviceId && selectionEpoch.current === epoch) setStatusStale(true);
+    } finally {
+      setCheckingStatus(false);
+    }
+  }
+
+  async function refreshSelectedStatus() {
+    const deviceId = selectedDeviceRef.current;
+    const epoch = selectionEpoch.current;
+    if (!deviceId) return;
+    try {
+      await loadDevice(deviceId, true);
+      if (selectedDeviceRef.current === deviceId && selectionEpoch.current === epoch)
+        setAlert({ kind: "info", text: "Статус обновлён из последнего ответа устройства." });
+    } catch (reason) {
+      if (selectedDeviceRef.current === deviceId && selectionEpoch.current === epoch) {
+        setStatusStale(true);
+        setAlert({ kind: "error", text: reason instanceof Error ? reason.message : "Не удалось обновить статус" });
+      }
+    }
   }
 
   async function doAction(action: Ask["action"]) {
@@ -390,10 +558,10 @@ function AppContent() {
   const pendingCommand = !isCommandFinal(command);
   const pageProps: PageProps | null = envelope && draft ? {
     draft, edit, envelope, deviceId: selectedDeviceId, onOpenConnections: openConnections,
-    setServiceDetail, serviceDetail, setNetworkCredentials: (updater) => { setNetworkCredentials(updater); dirtyRef.current = true; setDirty(true); },
+    setServiceDetail, serviceDetail, setNetworkCredentials: (updater) => { formEditSequence.current++; setNetworkCredentials(updater); dirtyRef.current = true; setDirty(true); },
     networkCredentials, networkEditing, setNetworkEditing, updates, command, pendingCommand,
     ask: setConfirm, busy, save, dirty, identity: session.identity,
-    refreshStatus: async () => { try { await loadDevice(selectedDeviceId, true); setAlert({ kind: "info", text: "Статус обновлён из последнего ответа устройства." }); } catch (reason) { setAlert({ kind: "error", text: reason instanceof Error ? reason.message : "Не удалось обновить статус" }); } },
+    refreshStatus: refreshSelectedStatus,
     downloadDiagnostics: async () => {
       const epoch = selectionEpoch.current;
       try {
@@ -404,6 +572,9 @@ function AppContent() {
     },
     runAction: doAction,
   } : null;
+  const statusPendingSince = envelope
+    ? pendingSinceRef.current.get(`${envelope.device_id}:${envelope.revision}`) ?? Date.now()
+    : Date.now();
 
   return (
     <div className="app-shell">
@@ -429,6 +600,14 @@ function AppContent() {
             {envelope && !showConnections && <StatusPill state={envelope.device.connected ? "good" : "warn"} label={envelope.device.connected ? t("Дисплей на связи") : t("Дисплей не в сети")} />}
           </div>
         </div>
+        {envelope && !showConnections && <SettingsApplyStatusCard
+          envelope={envelope}
+          pendingSince={statusPendingSince}
+          saveState={saveState}
+          stale={statusStale}
+          checking={checkingStatus}
+          onCheck={() => void checkApplicationStatus()}
+        />}
         {alert && <div className={`alert ${alert.kind}`} role={alert.kind === "error" ? "alert" : "status"}><span>{t(alert.text)}</span><button className="icon-button small" aria-label={t("Закрыть сообщение")} onClick={() => setAlert(null)}><Icon name="close" size={16} /></button></div>}
         {!devices && <div className="loading-screen"><div className="spinner" />{t("Загружаем дисплеи…")}</div>}
         {devices && showConnections && (connections ? <ConnectionsPage value={connections} onSave={saveConnections} onDirtyChange={(value) => { connectionsDirtyRef.current = value; }} /> : <div className="loading-screen"><div className="spinner" />{t("Загружаем общие подключения…")}</div>)}
