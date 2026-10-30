@@ -321,7 +321,7 @@ export function PhotosPage({
                 src={previewPhoto}
                 alt={t("Иллюстрация горного водопада")}
               />
-              <div className="photo-preview-overlays" aria-hidden="true">
+              <div className={`photo-preview-overlays${envelope.device.capabilities.includes("photo_overlay_adaptive") ? " adaptive" : ""}`} aria-hidden="true">
                 <span className="preview-demo">{t("Демо")}</span>
                 {(p.show_clock ?? true) && (
                   <div className="preview-clock">
@@ -373,11 +373,15 @@ export function PhotosPage({
               onChange={(value) => set("show_event", value)}
             />
           </div>
-          {!envelope.device.capabilities.includes("photo_overlay") && (
+          {!envelope.device.capabilities.includes("photo_overlay") ? (
             <small className="field-note">
               {t("Информационный слой появится после обновления прошивки дисплея.")}
             </small>
-          )}
+          ) : !envelope.device.capabilities.includes("photo_overlay_adaptive") ? (
+            <small className="field-note">
+              {t("Адаптивное оформление появится после обновления прошивки дисплея.")}
+            </small>
+          ) : null}
         </Field>
         <Field label={t("Запуск после бездействия")} help={<NumberHelp id={idleHelp} value={p.idle_seconds} {...photoTimingLimits.idle_seconds} />}>
           <BoundedNumberInput

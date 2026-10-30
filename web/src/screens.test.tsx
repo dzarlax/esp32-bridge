@@ -243,6 +243,22 @@ describe("settings screen field interactions", () => {
     );
   });
 
+  it("explains adaptive firmware compatibility while preserving editable preferences", () => {
+    const props = pageProps();
+    props.envelope.device.capabilities = ["preferences", "photo_overlay"];
+    const view = render(<PhotosPage {...props} />);
+    expect(screen.getByText("Адаптивное оформление появится после обновления прошивки дисплея.")).toBeTruthy();
+    const weather = screen.getByRole("switch", { name: /^Погода$/ }) as HTMLInputElement;
+    expect(weather.disabled).toBe(false);
+    fireEvent.click(weather);
+    expect(props.edit).toHaveBeenCalledWith(expect.objectContaining({
+      photos: expect.objectContaining({ show_weather: false }),
+    }));
+    props.envelope.device.capabilities.push("photo_overlay_adaptive");
+    view.rerender(<PhotosPage {...props} />);
+    expect(screen.queryByText("Адаптивное оформление появится после обновления прошивки дисплея.")).toBeNull();
+  });
+
   it("defaults absent photo overlay settings to enabled and edits each toggle independently", () => {
     const props = pageProps();
     delete props.draft.photos.show_clock;
