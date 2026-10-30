@@ -270,6 +270,8 @@ func (m *Manager) build(c config.Config, v settings.Values) (*runtime, error) {
 	if old := m.current.Load(); old != nil {
 		h.SharePhotoOverlayCache(old.handler)
 	}
+	r.mux.HandleFunc("/api/photo-frame/v2/context", h.PhotoContextV2)
+	r.mux.HandleFunc("/api/photo-frame/v2/overlays/", h.PhotoOverlayV2)
 	r.mux.HandleFunc("/api/photo-frame/v1/context", h.PhotoContext)
 	r.mux.HandleFunc("/api/photo-frame/v1/overlays/", h.PhotoOverlay)
 	r.mux.HandleFunc("/api/photo-frame/v1/manifest", h.PhotoManifest)

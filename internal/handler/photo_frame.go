@@ -30,7 +30,11 @@ func (h *Handler) PhotoManifest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unavailable", 500)
 		return
 	}
-	_ = json.NewEncoder(w).Encode(h.photoFrame.Manifest())
+	m := h.photoFrame.Manifest()
+	if h.overlay != nil {
+		m.OverlayContextVersion = 2
+	}
+	_ = json.NewEncoder(w).Encode(m)
 }
 func (h *Handler) PhotoFrame(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("X-API-Key") == "" {

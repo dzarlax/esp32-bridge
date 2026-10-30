@@ -38,11 +38,19 @@ The ESP32 has limited memory and TLS connections. Instead of making 7+ HTTPS cal
 | `/api/dashboard` | GET | All cached data: health, tasks, news, sensors, lights, weather, transport |
 | `/api/calendar?date=YYYY-MM-DD` | GET | On-demand events for a date (Calendar Platform when configured; otherwise Home Assistant) |
 | `/api/ha/action` | POST | Light toggle/on/off — returns fresh light state |
+| `/api/photo-frame/v1/manifest` | GET | Prepared photo list, hashes and slide timing |
+| `/api/photo-frame/v1/frames/{id}` | GET | Immutable 1024×600 RGB565 photo |
+| `/api/photo-frame/v1/context` | GET | Per-display clock preferences and weather/event card metadata |
+| `/api/photo-frame/v1/overlays/{render_id}` | GET | Immutable RGB565 weather or event card |
 | `/api/ota/check?v=X.Y.Z` | GET | Compares version against latest GitHub Release |
 | `/api/ota/firmware` | GET | Proxies firmware binary from GitHub Release |
 | `/health` | GET | Server health check with uptime |
 
-All endpoints except `/health` require authentication via `X-API-Key` header or `?key=` query parameter.
+Native endpoints require authentication. Use `X-API-Key`; photo-frame routes
+require this header and do not accept query-only credentials. Other legacy
+native handlers also accept `?key=`. Managed displays send `X-Device-ID` for
+profile routing; overlay context and image requests require it. The `/health`
+endpoint is public. Administrative APIs use their separate session/CSRF flow.
 
 ## Configuration
 
@@ -137,11 +145,7 @@ go run cmd/server/main.go  # Run locally
 - [Evening News](https://github.com/Dzarlax-AI/evening-news) — AI-powered news aggregator with summaries and categorization
 - [City Dashboard](https://github.com/dzarlax/city-dashboard) — Belgrade/Novi Sad/Niš public transit: schedules, routes, and real-time arrivals where available
 
-## License
-
-MIT
-
-### Photo frame (Stage A)
+## Photo frame
 
 The photo frame API is disabled by default. Set `PHOTO_FRAME_ENABLED=true` and
 `PHOTO_FRAME_SOURCE=fixture` to test synthetic images. `none` reports the source
@@ -161,22 +165,52 @@ at most 10% of their area. Otherwise, the complete sharp photo is centered over
 a blurred, dimmed cover copy of itself. Each frame contains one photo, without
 stretching. Background blur runs at 128×75 before smooth enlargement; foreground
 colors and sharpness are preserved.
-Rendering runs in a separate background worker, not in request handlers.
+Full-photo decoding and composition run in a background worker. Small information
+cards are rendered on demand and cached.
 
 Managed displays can independently enable `show_clock`, `show_weather`, and
 `show_event` in photo settings; omitted values default to true. With all three
-false, photos have no overlays. Photo pixels do not depend on clock visibility. The authenticated, device-scoped
+false, photos have no overlays. Photo pixels do not depend on clock visibility;
+there is no full-width shading behind the local clock. The device-scoped
 `GET /api/photo-frame/v1/context` returns clock preferences and up to two
 weather and next-event blocks. `GET /api/photo-frame/v1/overlays/{render_id}`
-returns the corresponding RGB565 little-endian pixels. Both routes require
-`X-API-Key` and `X-Device-ID`, use `no-store`, and leave the existing manifest
+returns the corresponding RGB565 little-endian pixels. The display updates
+clock/date locally and polls context once per minute while the frame is visible.
+Changing card content or visibility preserves photo order and the slide timer.
+Both routes require `X-API-Key` and `X-Device-ID`, use `no-store`, and leave the existing manifest
 and frame endpoints available. Weather and event blocks expire after 30 and 5
-minutes respectively, or earlier at an event transition. Partial calendar results
-use only explicitly ready, non-stale sources and label the resulting event card
+minutes respectively, measured from fresh source data, or earlier at an event
+transition. The event is the ongoing timed meeting or the next one within 24
+hours in the selected calendars, independently of the dashboard date selection;
+all-day events are excluded. Weather is checked at most once every five minutes.
+Partial calendar results use only explicitly ready, non-stale sources and label the resulting event card
 as coming from available calendars. The Go Regular font
 used for card text is distributed with `golang.org/x/image` under the Go BSD
 license.
 
+Weather cards are at most 236×200 pixels and event cards 480×112. Metadata includes
+SHA256, placement and expiry; images are private, per-display and sent with
+`Cache-Control: no-store`. The firmware retains valid cards on a transient error
+and hides them after expiry. Older firmware can keep using the original photo
+manifest/frame routes. The web panel explains when firmware lacks `photo_overlay`.
+
+Manual start remains in the web panel. HomeDash v1.0.27 removes the photo-frame
+action and its loading/status text from the Home tab.
+
+### Adaptive styling (HomeDash v1.0.28)
+
+The adaptive implementation adds `overlay_context_version: 2` to the v1
+manifest and provides `GET /api/photo-frame/v2/context?frame_id=<id>` and
+`GET /api/photo-frame/v2/overlays/{render_id}`. Both require the existing API
+key and device ID. Context and pixel data are bound to a currently borrowable
+prepared frame and device. Older clients continue to use v1.
+
+Weather and event patches contain the matching photo pixels and adaptive text;
+the clock remains local and receives an optional matching background patch.
+Each region independently chooses a light or dark tone, and busy regions use a
+local blurred tint and thin rounded contour. The source refresh cadence and
+visibility settings remain the same. Physical-device memory and long-running Wi-Fi acceptance remain separate from
+server and simulator checks.
 
 ### Immich album source
 
@@ -327,3 +361,7 @@ has not been built it returns 503 rather than a blank or placeholder panel.
 The device protocol and safe network/command lifecycle are documented in
 [settings-contract.md](docs/settings-contract.md). Firmware publication and a
 real device update remain separate release actions.
+
+## License
+
+MIT

@@ -50,12 +50,15 @@ type overlayContext struct {
 	Blocks     []overlayBlock `json:"blocks"`
 }
 type overlayImage struct {
-	data  []byte
-	added time.Time
+	data          []byte
+	added         time.Time
+	device, frame string
+	version       int
 }
 type overlayImages struct {
-	mu     sync.Mutex
-	images map[string]overlayImage
+	mu       sync.Mutex
+	images   map[string]overlayImage
+	adaptive map[string]overlayImage
 }
 type overlayState struct {
 	gate                            chan struct{}
@@ -66,6 +69,10 @@ type overlayState struct {
 	lastWeather, lastCalendar       time.Time
 	boundDevice                     string
 	weather, event                  *overlayBlock
+	weatherData                     *model.WeatherData
+	weatherExpiry                   time.Time
+	eventData                       *photoEvent
+	eventExpiry                     time.Time
 }
 
 func enabled(p *bool) bool { return p == nil || *p }
@@ -118,41 +125,11 @@ func (h *Handler) PhotoContext(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.boundDevice = device
-	now := time.Now()
-	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
-	defer cancel()
-	req := r.Clone(ctx)
-	if s.weatherEnabled && enabled(s.photos.ShowWeather) && now.Sub(s.lastWeather) >= 5*time.Minute {
-		s.lastWeather = now
-		data, sourceAt := h.orch.FetchRecentContext(ctx, "weather", 5*time.Minute)
-		var weather model.WeatherData
-		if len(data) > 0 && json.Unmarshal(data, &weather) == nil && ctx.Err() == nil {
-			b := renderWeather(weather, s.screen)
-			s.weather = s.save(r.Header.Get("X-Device-ID"), "weather", b, 236, 200, 752, 36, sourceAt.Add(30*time.Minute))
-		}
-	}
-	if s.calendarEnabled && enabled(s.photos.ShowEvent) && now.Sub(s.lastCalendar) >= time.Minute {
-		s.lastCalendar = now
-		event, err := h.nextPhotoEvent(req, now)
-		if err == nil && ctx.Err() == nil {
-			s.event = nil
-			if event != nil {
-				b := renderEvent(*event, s.screen, now)
-				expiry := now.Add(5 * time.Minute)
-				if event.start.After(now) && event.start.Before(expiry) {
-					expiry = event.start
-				}
-				if event.end.Before(expiry) {
-					expiry = event.end
-				}
-				s.event = s.save(r.Header.Get("X-Device-ID"), "event", b, 480, 112, 506, 450, expiry)
-			}
-		}
-	}
+	h.refreshOverlay(r, s)
 	if r.Context().Err() != nil {
 		return
 	}
-	now = time.Now()
+	now := time.Now()
 	result := overlayContext{Version: 1, ServerTime: now.Unix(), Clock: overlayClock{enabled(s.photos.ShowClock), s.screen.Locale, s.screen.Timezone, s.screen.ClockFormat}, Blocks: []overlayBlock{}}
 	if s.weatherEnabled && enabled(s.photos.ShowWeather) && s.weather != nil && s.weather.ExpiresAt > now.Unix() {
 		result.Blocks = append(result.Blocks, *s.weather)
@@ -168,6 +145,43 @@ func (h *Handler) PhotoContext(w http.ResponseWriter, r *http.Request) {
 	result.Revision = hex.EncodeToString(sum[:])
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(result)
+}
+func (h *Handler) refreshOverlay(r *http.Request, s *overlayState) {
+	now := time.Now()
+	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+	defer cancel()
+	req := r.Clone(ctx)
+	if s.weatherEnabled && enabled(s.photos.ShowWeather) && now.Sub(s.lastWeather) >= 5*time.Minute {
+		s.lastWeather = now
+		data, sourceAt := h.orch.FetchRecentContext(ctx, "weather", 5*time.Minute)
+		var weather model.WeatherData
+		if len(data) > 0 && json.Unmarshal(data, &weather) == nil && ctx.Err() == nil {
+			s.weatherData = &weather
+			s.weatherExpiry = sourceAt.Add(30 * time.Minute)
+			b := renderWeather(weather, s.screen)
+			s.weather = s.save(r.Header.Get("X-Device-ID"), "weather", b, 236, 200, 752, 36, sourceAt.Add(30*time.Minute))
+		}
+	}
+	if s.calendarEnabled && enabled(s.photos.ShowEvent) && now.Sub(s.lastCalendar) >= time.Minute {
+		s.lastCalendar = now
+		event, err := h.nextPhotoEvent(req, now)
+		if err == nil && ctx.Err() == nil {
+			s.event = nil
+			s.eventData = event
+			if event != nil {
+				b := renderEvent(*event, s.screen, now)
+				expiry := now.Add(5 * time.Minute)
+				if event.start.After(now) && event.start.Before(expiry) {
+					expiry = event.start
+				}
+				if event.end.Before(expiry) {
+					expiry = event.end
+				}
+				s.eventExpiry = expiry
+				s.event = s.save(r.Header.Get("X-Device-ID"), "event", b, 480, 112, 506, 450, expiry)
+			}
+		}
+	}
 }
 func (s *overlayState) save(device, kind string, data []byte, width, height, x, y int, expiry time.Time) *overlayBlock {
 	sum := sha256.Sum256(data)
@@ -195,7 +209,7 @@ func (s *overlayState) save(device, kind string, data []byte, width, height, x, 
 		}
 		delete(s.images.images, oldest)
 	}
-	s.images.images[key] = overlayImage{data, now}
+	s.images.images[key] = overlayImage{data: data, added: now, version: 1}
 	return &overlayBlock{kind, key, hex.EncodeToString(sum[:]), x, y, width, height, expiry.Unix()}
 }
 func (h *Handler) PhotoOverlay(w http.ResponseWriter, r *http.Request) {
@@ -365,6 +379,18 @@ func textLine(img *image.RGBA, x, y int, text string, size float64, c color.Colo
 	}
 	d.DrawString(text)
 }
+func adaptiveTextLine(img *image.RGBA, x, y int, text string, size float64, c color.Color, max int, adaptive, dark bool) {
+	if adaptive {
+		shadow := color.RGBA{0, 0, 0, 255}
+		if dark {
+			shadow = color.RGBA{255, 255, 255, 255}
+		}
+		for _, offset := range [][2]int{{-1, 0}, {1, 0}, {0, -1}, {0, 1}} {
+			textLine(img, x+offset[0], y+offset[1], text, size, shadow, max)
+		}
+	}
+	textLine(img, x, y, text, size, c, max)
+}
 func circle(img *image.RGBA, cx, cy, r int, c color.Color) {
 	cx *= 2
 	cy *= 2
@@ -444,16 +470,38 @@ func weatherDescription(code int, day bool, loc string) string {
 }
 func renderWeather(w model.WeatherData, s settings.Screen) []byte {
 	img := card(236, 200)
+	drawWeather(img, w, s, false, false)
+	return pixels(img)
+}
+func drawWeather(img *image.RGBA, w model.WeatherData, s settings.Screen, dark, adaptive bool) {
 	white := color.RGBA{242, 246, 252, 255}
 	muted := color.RGBA{190, 205, 220, 255}
+	if dark {
+		white = color.RGBA{20, 29, 42, 255}
+		muted = color.RGBA{35, 45, 55, 255}
+	}
+	if adaptive {
+		white = color.RGBA{255, 255, 255, 255}
+		muted = white
+		if dark {
+			white = color.RGBA{0, 0, 0, 255}
+			muted = white
+		}
+	}
+
 	if w.IsDay {
 		circle(img, 166, 43, 23, color.RGBA{255, 211, 113, 255})
 	} else {
 		circle(img, 166, 43, 22, color.RGBA{217, 230, 247, 255})
-		circle(img, 176, 34, 20, color.RGBA{20, 29, 42, 255})
+		if !adaptive {
+			circle(img, 176, 34, 20, color.RGBA{20, 29, 42, 255})
+		}
 	}
 	if w.WeatherCode != 0 {
 		cloud := color.RGBA{226, 235, 248, 255}
+		if dark {
+			cloud = color.RGBA{67, 83, 100, 255}
+		}
 		circle(img, 143, 65, 17, cloud)
 		circle(img, 165, 57, 23, cloud)
 		circle(img, 188, 66, 16, cloud)
@@ -486,15 +534,32 @@ func renderWeather(w model.WeatherData, s settings.Screen) []byte {
 			}
 		}
 	}
-	textLine(img, 18, 118, fmt.Sprintf("%.0f°", math.Round(w.Temp)), 40, white, 200)
-	textLine(img, 19, 149, s.City, 18, white, 198)
-	textLine(img, 19, 177, weatherDescription(w.WeatherCode, w.IsDay, s.Locale), 16, muted, 198)
-	return pixels(img)
+	adaptiveTextLine(img, 18, 118, fmt.Sprintf("%.0f°", math.Round(w.Temp)), 40, white, 200, adaptive, dark)
+	adaptiveTextLine(img, 19, 149, s.City, 18, white, 198, adaptive, dark)
+	adaptiveTextLine(img, 19, 177, weatherDescription(w.WeatherCode, w.IsDay, s.Locale), 16, muted, 198, adaptive, dark)
+	return
 }
 func renderEvent(e photoEvent, s settings.Screen, now time.Time) []byte {
 	img := card(480, 112)
+	drawEvent(img, e, s, now, false, false)
+	return pixels(img)
+}
+func drawEvent(img *image.RGBA, e photoEvent, s settings.Screen, now time.Time, dark, adaptive bool) {
 	white := color.RGBA{242, 246, 252, 255}
 	muted := color.RGBA{185, 205, 225, 255}
+	if dark {
+		white = color.RGBA{20, 29, 42, 255}
+		muted = color.RGBA{35, 45, 55, 255}
+	}
+	if adaptive {
+		white = color.RGBA{255, 255, 255, 255}
+		muted = white
+		if dark {
+			white = color.RGBA{0, 0, 0, 255}
+			muted = white
+		}
+	}
+
 	loc, err := time.LoadLocation(s.Timezone)
 	if err != nil {
 		loc = time.UTC
@@ -538,14 +603,14 @@ func renderEvent(e photoEvent, s settings.Screen, now time.Time) []byte {
 		}
 		label += " · " + day + " " + e.start.In(loc).Format(format)
 	}
-	textLine(img, 20, 29, label, 16, muted, 440)
-	textLine(img, 20, 70, e.title, 27, white, 440)
+	adaptiveTextLine(img, 20, 29, label, 16, muted, img.Bounds().Dx()/2-40, adaptive, dark)
+	adaptiveTextLine(img, 20, 70, e.title, 27, white, img.Bounds().Dx()/2-40, adaptive, dark)
 	if e.partial {
 		caption := map[string]string{"ru": "По доступным календарям", "en": "From available calendars", "sr-Latn": "Iz dostupnih kalendara"}[s.Locale]
 		if caption == "" {
 			caption = "From available calendars"
 		}
-		textLine(img, 20, 96, caption, 14, muted, 440)
+		adaptiveTextLine(img, 20, 96, caption, 14, muted, img.Bounds().Dx()/2-40, adaptive, dark)
 	}
-	return pixels(img)
+	return
 }

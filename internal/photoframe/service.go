@@ -29,17 +29,18 @@ type Frame struct {
 	SHA256 string `json:"sha256"`
 }
 type Manifest struct {
-	Version    int     `json:"version"`
-	State      string  `json:"state"`
-	Generation string  `json:"generation"`
-	Idle       int     `json:"idle_after_s"`
-	Interval   int     `json:"slide_interval_s"`
-	Stale      int     `json:"max_stale_s"`
-	Width      int     `json:"width"`
-	Height     int     `json:"height"`
-	Format     string  `json:"pixel_format"`
-	Bytes      int     `json:"frame_bytes"`
-	Frames     []Frame `json:"frames"`
+	OverlayContextVersion int     `json:"overlay_context_version,omitempty"`
+	Version               int     `json:"version"`
+	State                 string  `json:"state"`
+	Generation            string  `json:"generation"`
+	Idle                  int     `json:"idle_after_s"`
+	Interval              int     `json:"slide_interval_s"`
+	Stale                 int     `json:"max_stale_s"`
+	Width                 int     `json:"width"`
+	Height                int     `json:"height"`
+	Format                string  `json:"pixel_format"`
+	Bytes                 int     `json:"frame_bytes"`
+	Frames                []Frame `json:"frames"`
 }
 type cached struct {
 	frame     Frame
