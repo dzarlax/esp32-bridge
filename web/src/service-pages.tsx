@@ -1,5 +1,6 @@
 import { CatalogPicker } from "./catalog-picker";
-import type { Favorite } from "./types";
+import { AdminApi, ApiError } from "./api";
+import type { CatalogItem, Favorite } from "./types";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import type { Settings } from "./types";
@@ -222,7 +223,8 @@ function ServiceEditor({
             onEdit={props.onOpenConnections}
           />
           <FavoritesEditor home={draft.services.home} supported={envelope.device.capabilities.includes("home_favorites")} onChange={(favorites) => update("favorites", favorites)} />
-          {(["sensors", "lights", "climates"] as const).map((field) => (
+          <HomeEntityPicker deviceId={props.deviceId} selected={{ light: item.lights, climate: item.climates, sensor: item.sensors }} onChange={(next) => edit({ ...draft, services: { ...draft.services, home: { ...draft.services.home, lights: next.light, climates: next.climate, sensors: next.sensor } } })} />
+          <details><summary>{t("Дополнительно: ID вручную")}</summary>{(["sensors", "lights", "climates"] as const).map((field) => (
             <Field
               key={field}
               label={
@@ -238,11 +240,59 @@ function ServiceEditor({
                 onChange={(e) => list(field, e.target.value)}
               />
             </Field>
-          ))}
+          ))}</details>
         </>
       )}
     </div>
   );
+}
+
+export function HomeEntityPicker({ selected, onChange, deviceId }: { selected: Record<"light" | "climate" | "sensor", string[]>; onChange: (value: Record<"light" | "climate" | "sensor", string[]>) => void; deviceId: string }) {
+  const t = useT();
+  const [items, setItems] = useState<CatalogItem[]>([]);
+  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const [error, setError] = useState("");
+  const [attempt, setAttempt] = useState(0);
+  const [domain, setDomain] = useState<"light" | "climate" | "sensor">("light");
+  const [query, setQuery] = useState("");
+  useEffect(() => {
+    let active = true;
+    setState("loading");
+    new AdminApi().entities(deviceId).then((result) => {
+      if (!active) return;
+      if (!result.complete || !Array.isArray(result.items)) throw new ApiError("catalog_invalid_response", 502);
+      setItems(result.items); setState("ready");
+    }).catch((reason: unknown) => {
+      if (!active) return;
+      const codes: Record<string, string> = { catalog_connection_changed: "Подключение изменилось. Обновите список.", catalog_not_configured: "Настройте сохранённое подключение к источнику.", catalog_forbidden: "Источник отказал в доступе к списку.", catalog_timeout: "Источник не ответил вовремя.", catalog_too_large: "Список слишком велик для загрузки.", catalog_upstream_error: "Не удалось получить список от источника.", catalog_invalid_response: "Источник вернул некорректный список." };
+      setError(t(reason instanceof ApiError ? codes[reason.code] ?? "Не удалось загрузить список." : "Не удалось загрузить список.")); setState("error");
+    });
+    return () => { active = false; };
+  }, [deviceId, attempt, t]);
+  const allSelected = ["light", "climate", "sensor"].flatMap((kind) => selected[kind as keyof typeof selected]);
+  const missing = state === "ready" ? allSelected.filter((id) => !items.some((item) => item.id === id)) : allSelected;
+  const filtered = items.filter((item) => item.domain === domain && `${item.name} ${item.id}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+  const toggle = (item: CatalogItem, checked: boolean) => {
+    if (!item.domain) return;
+    const current = selected[item.domain];
+    const next = checked ? [...current, item.id] : current.filter((id) => id !== item.id);
+    onChange({ ...selected, [item.domain]: next });
+  };
+  return <div className="catalog-picker home-entity-picker field-control">
+    <strong>{t("Выбор сущностей Home Assistant")}</strong>
+    {state === "loading" && <p role="status">{t("Загрузка списка…")}</p>}
+    {state === "error" && <p role="alert">{error} <button type="button" className="button secondary" onClick={() => setAttempt((value) => value + 1)}>{t("Повторить")}</button></p>}
+    {state === "ready" && <>
+      <div className="catalog-controls"><input type="search" aria-label={t("Поиск по имени или ID")} placeholder={t("Поиск по имени или ID")} value={query} onChange={(event) => setQuery(event.target.value)} /><button type="button" className="button secondary" onClick={() => setAttempt((value) => value + 1)}>{t("Обновить список")}</button></div>
+      <div role="tablist" aria-label={t("Тип сущности")} className="entity-tabs">{(["light", "climate", "sensor"] as const).map((kind) => <button type="button" role="tab" aria-selected={domain === kind} key={kind} onClick={() => setDomain(kind)}>{t(({ light: "Свет", climate: "Климат", sensor: "Датчики" } as const)[kind])}</button>)}</div>
+      {!filtered.length && <p>{t(items.length ? "Ничего не найдено." : "Список пуст. Текущий выбор сохранён.")}</p>}
+      <div className="catalog-list">{filtered.map((item) => { const current = selected[item.domain!]; const limit = ({ light: 8, climate: 1, sensor: 10 } as const)[item.domain!]; const entityIDTooLong = new TextEncoder().encode(item.id).length > (item.domain === "sensor" ? 128 : 47); return <label className="catalog-option" key={item.id}>
+        <input type="checkbox" checked={current.includes(item.id)} disabled={(item.available === false && !current.includes(item.id)) || (entityIDTooLong && !current.includes(item.id)) || (!current.includes(item.id) && current.length >= limit)} onChange={(event) => toggle(item, event.target.checked)} />
+        <span>{item.name}<small>{item.id}</small>{item.available === false && <small>{t("Недоступна в Home Assistant")}</small>}{entityIDTooLong && <small>{t("ID сущности превышает ограничение устройства")}</small>}</span>
+      </label>; })}</div>
+    </>}
+    {missing.map((id) => <div className="catalog-retained" key={id}><span>{id} — {t(state === "ready" ? "Недоступен в списке" : "Сохранённый выбор; список не загружен")}</span><button type="button" className="button secondary" onClick={() => { const key = id.startsWith("light.") ? "light" : id.startsWith("climate.") ? "climate" : "sensor"; onChange({ ...selected, [key]: selected[key].filter((value) => value !== id) }); }}>{t("Удалить из выбора")}</button></div>)}
+  </div>;
 }
 
 function FavoritesEditor({ home, supported, onChange }: { home: Settings["services"]["home"]; supported: boolean; onChange: (value: Favorite[]) => void }) {
@@ -250,7 +300,7 @@ function FavoritesEditor({ home, supported, onChange }: { home: Settings["servic
   const favorites = home.favorites ?? [];
   const choices = [...home.lights.map((entity_id) => ({ entity_id, kind: "light" as const })), ...home.climates.map((entity_id) => ({ entity_id, kind: "climate" as const }))].filter((entry) => !favorites.some((favorite) => favorite.entity_id === entry.entity_id));
   const move = (index: number, offset: number) => { const next = [...favorites]; const target = index + offset; if (target < 0 || target >= next.length) return; [next[index], next[target]] = [next[target]!, next[index]!]; onChange(next); };
-  return <div className="favorites-editor"><strong>{t("Избранное на главном экране")}</strong><p className="field-note">{t("До четырёх настроенных источников света или климата. Порядок задаётся кнопками.")}</p>
+  return <div className="favorites-editor field-control"><strong>{t("Избранное на главном экране")}</strong><p className="field-note">{t("До четырёх настроенных источников света или климата. Порядок задаётся кнопками.")}</p>
     {!supported && <p>{t("Эта прошивка не поддерживает избранное.")}</p>}
     {favorites.map((favorite, index) => { const available = (favorite.kind === "light" ? home.lights : home.climates).includes(favorite.entity_id); return <div className="favorite-item" key={favorite.entity_id}>
       <span>{favorite.entity_id} { !available && <small>— {t("Недоступен в настройках")}</small>}</span>

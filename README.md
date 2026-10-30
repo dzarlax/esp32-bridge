@@ -46,6 +46,11 @@ The ESP32 has limited memory and TLS connections. Instead of making 7+ HTTPS cal
 | `/api/ota/firmware` | GET | Proxies firmware binary from GitHub Release |
 | `/health` | GET | Server health check with uptime |
 
+`/api/calendar` keeps its JSON array response and adds the optional
+`X-HomeDash-Calendar-State` header with `complete` or `partial`. Older firmware
+can ignore the header; clients that track calendar completeness can use it to
+avoid treating a partial or empty result as a complete free day.
+
 Native endpoints require authentication. Use `X-API-Key`; photo-frame routes
 require this header and do not accept query-only credentials. Other legacy
 native handlers also accept `?key=`. Managed displays send `X-Device-ID` for
@@ -381,6 +386,10 @@ MIT
 
 ### Home settings and source catalogs
 
-Bridge supports per-display Home favorites, read-only album and calendar catalogs, persistent OTA attempt history, and capability-gated brightness settings and preview commands. Native Home favorites and detailed OTA reporting require HomeDash v1.0.30 or newer. Brightness requires a calibrated and supported device; hardware behavior and physical acceptance remain unverified. Catalogs use only saved shared connections and credentials and do not expose photo previews or calendar events. OTA history records device-reported results, while a timeout is unknown rather than a failure.
+Bridge supports per-display Home favorites, read-only album, calendar, and Home Assistant entity catalogs, persistent OTA attempt history, and capability-gated brightness settings and preview commands. Native Home favorites and detailed OTA reporting require HomeDash v1.0.30 or newer. Brightness requires a calibrated and supported device; hardware behavior and physical acceptance remain unverified.
+
+The admin-only Home Assistant catalog uses the shared saved URL and token to fetch entity IDs, friendly names, domains, and availability. It does not expose state values, attributes, history, or credentials. Entity selection is saved explicitly with the display's settings revision. The selector and Bridge reject newly added light or climate IDs that exceed the firmware's entity-ID buffer; existing saved IDs remain intact. Removing a selected light or climate entity used by a favorite requires resolving that favorite before saving. Catalogs use only saved shared connections and credentials and do not expose photo previews or calendar events.
+
+OTA history records device-reported results, while a timeout is unknown rather than a failure. The panel reports a version as current only when the display's heartbeat is fresh; offline versions are shown as last known. A matching live version observation does not rewrite an uncertain OTA attempt.
 
 Rollback requires a private, verified backup of the complete Bridge settings state made before this version writes it. Earlier Bridge versions decode stored JSON strictly and cannot safely read state containing the new optional fields; restoring that backup also restores the settings, credentials, revisions, and command state it contained at backup time. Do not overwrite newer state without accounting for those changes.

@@ -1813,6 +1813,9 @@ input[aria-invalid="true"] {
 .catalog-controls input { flex: 1 1 12rem; min-width: 0; }
 .catalog-list { max-height: 20rem; overflow-y: auto; overscroll-behavior: contain; }
 .catalog-retained { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; margin: .5rem 0; overflow-wrap: anywhere; }
+.entity-tabs { display: flex; gap: .35rem; margin: .65rem 0; overflow-x: auto; }
+.entity-tabs button { min-height: 44px; padding: .45rem .8rem; white-space: nowrap; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--text); cursor: pointer; }
+.entity-tabs button[aria-selected="true"] { border-color: var(--teal); background: color-mix(in srgb, var(--teal) 12%, var(--surface)); }
 
 /* The source settings occupy a half-width column, so their labels need their own row. */
 .photos-source-column .nested-form .field {

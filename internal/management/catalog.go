@@ -20,6 +20,8 @@ const catalogLimit = 2 << 20
 type catalogItem struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
+	Domain     string `json:"domain,omitempty"`
+	Available  *bool  `json:"available,omitempty"`
 	AssetCount *int   `json:"asset_count,omitempty"`
 	Provider   string `json:"provider,omitempty"`
 	TimeZone   string `json:"time_zone,omitempty"`
@@ -56,8 +58,34 @@ func validCatalogText(v string, limit int) bool {
 	}
 	return true
 }
+
+func validEntityID(id string) bool {
+	if len(id) > 255 || !validCatalogText(id, 255) {
+		return false
+	}
+	parts := strings.SplitN(id, ".", 2)
+	if len(parts) != 2 || (parts[0] != "light" && parts[0] != "climate" && parts[0] != "sensor" && !validEntitySlug(parts[0])) {
+		return false
+	}
+	return validEntitySlug(parts[1])
+}
+
+func validEntitySlug(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9') && r != '_' {
+			return false
+		}
+	}
+	return true
+}
 func (a *API) catalogCurrent(kind, base, secret string) bool {
 	values, secrets := a.Store.Snapshot()
+	if kind == "entities" {
+		return values[""].Services["home"].BaseURL == base && secrets["ha_token"] == secret
+	}
 	if kind == "calendars" {
 		return values[""].Services["calendar"].BaseURL == base && secrets["calendar_platform_token"] == secret
 	}
@@ -76,13 +104,15 @@ func (a *API) catalog(w http.ResponseWriter, r *http.Request, id, kind string) {
 	base, secret, path, header := values[""].Photos.BaseURL, secrets["immich_api_key"], "/api/albums", "X-API-Key"
 	if kind == "calendars" {
 		base, secret, path, header = values[""].Services["calendar"].BaseURL, secrets["calendar_platform_token"], "/api/native/v1/calendars", "Authorization"
+	} else if kind == "entities" {
+		base, secret, path, header = values[""].Services["home"].BaseURL, secrets["ha_token"], "/api/states", "Authorization"
 	}
 	if base == "" || secret == "" {
 		failure(w, http.StatusServiceUnavailable, "catalog_not_configured")
 		return
 	}
 	u, err := url.Parse(base)
-	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "https" && (kind == "albums" || u.Scheme != "http")) {
+	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (kind == "albums" && u.Scheme != "https") || (kind != "albums" && u.Scheme != "https" && u.Scheme != "http") {
 		failure(w, http.StatusServiceUnavailable, "catalog_not_configured")
 		return
 	}
@@ -162,7 +192,11 @@ func (a *API) catalog(w http.ResponseWriter, r *http.Request, id, kind string) {
 		failure(w, http.StatusBadGateway, "catalog_upstream_error")
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, catalogLimit+1))
+	maxBody := int64(catalogLimit)
+	if kind == "entities" {
+		maxBody = 8 << 20
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
 	if err != nil {
 		var ne net.Error
 		if errors.As(err, &ne) && ne.Timeout() {
@@ -172,7 +206,7 @@ func (a *API) catalog(w http.ResponseWriter, r *http.Request, id, kind string) {
 		}
 		return
 	}
-	if len(body) > catalogLimit {
+	if int64(len(body)) > maxBody {
 		failure(w, http.StatusBadGateway, "catalog_too_large")
 		return
 	}
@@ -200,7 +234,7 @@ func (a *API) catalog(w http.ResponseWriter, r *http.Request, id, kind string) {
 			seen[row.ID] = true
 			items = append(items, catalogItem{ID: row.ID, Name: row.Name, AssetCount: row.Count})
 		}
-	} else {
+	} else if kind == "calendars" {
 		var data struct {
 			Calendars []struct {
 				ID       string `json:"id"`
@@ -226,6 +260,45 @@ func (a *API) catalog(w http.ResponseWriter, r *http.Request, id, kind string) {
 			}
 			seen[row.ID] = true
 			items = append(items, catalogItem{ID: row.ID, Name: row.Name, Provider: calendarProvider(row.ID), TimeZone: row.TimeZone, Color: row.Color, ReadOnly: true})
+		}
+	} else {
+		var rows []struct {
+			ID    string          `json:"entity_id"`
+			State json.RawMessage `json:"state"`
+			Attrs json.RawMessage `json:"attributes"`
+		}
+		if json.Unmarshal(body, &rows) != nil || rows == nil {
+			failure(w, http.StatusBadGateway, "catalog_invalid_response")
+			return
+		}
+		if len(rows) > 5000 {
+			failure(w, http.StatusBadGateway, "catalog_too_large")
+			return
+		}
+		for _, row := range rows {
+			if !validEntityID(row.ID) || seen[row.ID] {
+				failure(w, http.StatusBadGateway, "catalog_invalid_response")
+				return
+			}
+			seen[row.ID] = true
+			domain := strings.SplitN(row.ID, ".", 2)[0]
+			if domain != "light" && domain != "climate" && domain != "sensor" {
+				continue
+			}
+			var state string
+			var attrs struct {
+				Name string `json:"friendly_name"`
+			}
+			if json.Unmarshal(row.State, &state) != nil || json.Unmarshal(row.Attrs, &attrs) != nil || (attrs.Name != "" && !validCatalogText(attrs.Name, 512)) {
+				failure(w, http.StatusBadGateway, "catalog_invalid_response")
+				return
+			}
+			name := attrs.Name
+			if name == "" {
+				name = row.ID
+			}
+			available := state != "unavailable" && state != "unknown"
+			items = append(items, catalogItem{ID: row.ID, Name: name, Domain: domain, Available: &available})
 		}
 	}
 	if !a.catalogCurrent(kind, base, secret) {

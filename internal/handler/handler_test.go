@@ -125,6 +125,9 @@ func TestCalendarUsesCalendarPlatformWithStableIndices(t *testing.T) {
 	if res.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", res.Code, res.Body.String())
 	}
+	if got := res.Header().Get(calendarStateHeader); got != "complete" {
+		t.Fatalf("calendar state = %q, want complete", got)
+	}
 	var got []model.CalendarEvent
 	if err := json.Unmarshal(res.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
@@ -136,6 +139,70 @@ func TestCalendarUsesCalendarPlatformWithStableIndices(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("calendar = %#v, want %#v", got, want)
+	}
+}
+
+func TestCalendarPlatformReportsPartialEvenWhenPartialDayIsEmpty(t *testing.T) {
+	calendarAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"complete":false,"items":[],"sources":[{"calendar_id":"google:one","status":"ready","stale":false}]}`))
+	}))
+	defer calendarAPI.Close()
+
+	h := New(nil, "bridge-key", "", "", nil, nil, calendarAPI.Client())
+	h.SetCalendarPlatform(calendarAPI.URL, "calendar-token", []string{"google:one", "google:two"}, "Europe/Belgrade")
+	req := httptest.NewRequest(http.MethodGet, "/api/calendar?date=2026-09-02", nil)
+	req.Header.Set("X-API-Key", "bridge-key")
+	res := httptest.NewRecorder()
+	h.Calendar(res, req)
+	if res.Code != http.StatusOK || res.Header().Get(calendarStateHeader) != "partial" {
+		t.Fatalf("status=%d state=%q body=%s", res.Code, res.Header().Get(calendarStateHeader), res.Body.String())
+	}
+	if got := res.Body.String(); got != "[]\n" {
+		t.Fatalf("body=%q, want empty JSON array", got)
+	}
+}
+
+func TestHACalendarReportsPartialAndFailsWhenEveryCalendarFails(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		failedCount int
+		wantStatus  int
+		wantState   string
+	}{
+		{name: "one calendar failed", failedCount: 1, wantStatus: http.StatusOK, wantState: "partial"},
+		{name: "all calendars failed", failedCount: 2, wantStatus: http.StatusBadGateway},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ha := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/calendars" {
+					_, _ = w.Write([]byte(`[{"entity_id":"calendar.one","name":"One"},{"entity_id":"calendar.two","name":"Two"}]`))
+					return
+				}
+				failed := r.URL.Path == "/api/calendars/calendar.one" || (tc.failedCount == 2 && r.URL.Path == "/api/calendars/calendar.two")
+				if failed {
+					http.Error(w, "calendar unavailable", http.StatusServiceUnavailable)
+					return
+				}
+				_, _ = w.Write([]byte(`[]`))
+			}))
+			defer ha.Close()
+
+			h := New(nil, "bridge-key", ha.URL, "ha-token", nil, nil, ha.Client())
+			req := httptest.NewRequest(http.MethodGet, "/api/calendar?date=2026-09-02", nil)
+			req.Header.Set("X-API-Key", "bridge-key")
+			res := httptest.NewRecorder()
+			h.Calendar(res, req)
+			if res.Code != tc.wantStatus {
+				t.Fatalf("status=%d body=%s, want %d", res.Code, res.Body.String(), tc.wantStatus)
+			}
+			if tc.wantState != "" && res.Header().Get(calendarStateHeader) != tc.wantState {
+				t.Fatalf("calendar state=%q, want %q", res.Header().Get(calendarStateHeader), tc.wantState)
+			}
+			if tc.wantStatus == http.StatusOK && res.Body.String() != "[]\n" {
+				t.Fatalf("body=%q, want empty JSON array", res.Body.String())
+			}
+		})
 	}
 }
 

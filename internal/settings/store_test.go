@@ -583,15 +583,53 @@ func TestFavoritesCapabilitiesAndRetainedUnavailable(t *testing.T) {
 	home = view.Settings.Services["home"]
 	home.Lights = nil
 	view.Settings.Services["home"] = home
-	if err := s.Update(id, view.Revision, Patch{Settings: view.Settings}); err != nil {
-		t.Fatal(err)
+	if err := s.Update(id, view.Revision, Patch{Settings: view.Settings}); err == nil {
+		t.Fatal("removing a favorite's selected light must require resolving the favorite")
 	}
 	view, _ = s.View(id, nil)
 	home = view.Settings.Services["home"]
-	home.Favorites[0].Label = "new"
+	home.Lights = nil
+	home.Favorites = nil
+	view.Settings.Services["home"] = home
+	if err := s.Update(id, view.Revision, Patch{Settings: view.Settings}); err != nil {
+		t.Fatal("explicitly resolving favorite should allow removal", err)
+	}
+}
+
+func TestUpdatePreservesPreexistingOrphanedFavoriteAndRejectsNewOverlengthEntityIDs(t *testing.T) {
+	s, _ := newStore(t, nil)
+	id := testID('a')
+	register(t, s, id, "boot", "home_favorites")
+	view, _ := s.View(id, nil)
+	home := view.Settings.Services["home"]
+	home.Lights = []string{"light.old"}
+	home.Favorites = []Favorite{{EntityID: "light.old", Kind: "light"}}
+	view.Settings.Services["home"] = home
+	if err := s.Update(id, view.Revision, Patch{Settings: view.Settings}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A previously saved orphan can still survive unrelated edits and be repaired later.
+	s.mu.Lock()
+	p := s.state.Profiles[id]
+	home = p.Settings.Services["home"]
+	home.Lights = nil
+	p.Settings.Services["home"] = home
+	s.state.Profiles[id] = p
+	s.mu.Unlock()
+	view, _ = s.View(id, nil)
+	view.Settings.Screen.City = "Novi Sad"
+	if err := s.Update(id, view.Revision, Patch{Settings: view.Settings}); err != nil {
+		t.Fatal("unchanged preexisting orphan should be preserved", err)
+	}
+
+	view, _ = s.View(id, nil)
+	home = view.Settings.Services["home"]
+	home.Favorites = nil
+	home.Lights = []string{"light." + strings.Repeat("a", 42)}
 	view.Settings.Services["home"] = home
 	if err := s.Update(id, view.Revision, Patch{Settings: view.Settings}); err == nil {
-		t.Fatal("unconfigured favorite modified")
+		t.Fatal("new light entity exceeding firmware buffer should be rejected")
 	}
 }
 

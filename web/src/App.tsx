@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AdminApi, ApiError, isRevisionConflict } from "./api";
-import { photoTimingError, type PhotoTiming } from "./validation";
+import { hasUnresolvedHomeFavorite, homeEntityLengthError, photoTimingError, type PhotoTiming } from "./validation";
 import { ConnectionsPage } from "./connections-page";
 import { ConfirmDialog, DevicePage, UpdatesPage } from "./device-pages";
 import { NetworkPage, ServicesPage } from "./service-pages";
@@ -27,6 +27,7 @@ import { hasCurrentApplicationAck, sameSettings } from "./settings-apply-status"
 import { SettingsApplyStatusCard } from "./settings-apply-status-card";
 
 const api = new AdminApi();
+const FIRMWARE_READ_MAX_AGE_MS = 15_000;
 function Login({ session, onLogin }: { session: Session; onLogin: (session: Session) => void }) {
   const t = useT();
   const [password, setPassword] = useState("");
@@ -77,6 +78,7 @@ function AppContent() {
   const selectedDeviceRef = useRef("");
   const selectionEpoch = useRef(0);
   const requestSequence = useRef(0);
+  const updatesRequestSequence = useRef(0);
   const [envelope, setEnvelope] = useState<Envelope | null>(null);
   const [draft, setDraft] = useState<Settings | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -100,6 +102,9 @@ function AppContent() {
   const [confirm, setConfirm] = useState<Ask | null>(null);
   const [command, setCommand] = useState<Command | null>(null);
   const [updates, setUpdates] = useState<UpdateInfo | null>(null);
+  const [deviceSnapshotReadAt, setDeviceSnapshotReadAt] = useState<number | null>(null);
+  const [updatesSnapshotReadAt, setUpdatesSnapshotReadAt] = useState<number | null>(null);
+  const [freshnessClock, setFreshnessClock] = useState(() => Date.now());
   const [networkEditing, setNetworkEditing] = useState(false);
   const [serviceDetail, setServiceDetail] = useState<keyof Settings["services"]>("weather");
   const [conflict, setConflict] = useState(false);
@@ -135,9 +140,16 @@ function AppContent() {
     if (!deviceId || selectedDeviceRef.current !== deviceId) return null;
     const epoch = selectionEpoch.current;
     const sequence = ++requestSequence.current;
-    const next = await api.settings(deviceId);
+    let next: Envelope;
+    try {
+      next = await api.settings(deviceId);
+    } catch (reason) {
+      if (selectedDeviceRef.current === deviceId && selectionEpoch.current === epoch) setDeviceSnapshotReadAt(null);
+      throw reason;
+    }
     if (sequence !== requestSequence.current || selectionEpoch.current !== epoch || selectedDeviceRef.current !== deviceId || next.device_id !== deviceId) return null;
     setEnvelope(next);
+    setDeviceSnapshotReadAt(Date.now());
     setStatusStale(false);
     observeApplication(next);
     if (!ambiguousSaveRef.current && saveStateRevisionRef.current !== null && next.revision !== saveStateRevisionRef.current) {
@@ -167,6 +179,20 @@ function AppContent() {
     return next;
   }, []);
 
+  const loadUpdates = useCallback(async (deviceId: string) => {
+    const sequence = ++updatesRequestSequence.current;
+    try {
+      const result = await api.updates(deviceId);
+      if (sequence !== updatesRequestSequence.current || selectedDeviceRef.current !== deviceId) return null;
+      setUpdates(result);
+      setUpdatesSnapshotReadAt(Date.now());
+      return result;
+    } catch (reason) {
+      if (sequence === updatesRequestSequence.current && selectedDeviceRef.current === deviceId) setUpdatesSnapshotReadAt(null);
+      throw reason;
+    }
+  }, []);
+
   async function refreshDevicesAndSelect() {
     const result = await api.devices();
     const nextDevices = Array.isArray(result.devices) ? result : { ...result, devices: [] };
@@ -183,6 +209,9 @@ function AppContent() {
       setSelectedDeviceId(existingId);
       updateDeviceQuery(existingId);
       setEnvelope(null);
+      setUpdates(null);
+      setDeviceSnapshotReadAt(null);
+      setUpdatesSnapshotReadAt(null);
       setDraft(null);
       draftRef.current = null;
       setDirty(false);
@@ -220,24 +249,33 @@ function AppContent() {
       if (currentId) {
         const currentEpoch = selectionEpoch.current;
         void loadDevice(currentId, true).catch(() => {
-          if (selectedDeviceRef.current === currentId && selectionEpoch.current === currentEpoch) setStatusStale(true);
+          if (selectedDeviceRef.current === currentId && selectionEpoch.current === currentEpoch) {
+            setStatusStale(true);
+            setDeviceSnapshotReadAt(null);
+          }
         });
-        void api.updates(currentId).then((result) => {
-          if (selectedDeviceRef.current === currentId) setUpdates(result);
-        }).catch(() => undefined);
+        void loadUpdates(currentId).catch(() => undefined);
       }
       if (showConnections) void loadConnections().catch(() => undefined);
     }, 8000);
     return () => window.clearInterval(timer);
-  }, [session?.authenticated, showConnections, loadConnections, loadDevice]);
+  }, [session?.authenticated, showConnections, loadConnections, loadDevice, loadUpdates]);
 
   useEffect(() => {
     const currentId = selectedDeviceId;
     if (!session?.authenticated || !currentId) return;
-    void api.updates(currentId).then((result) => {
-      if (selectedDeviceRef.current === currentId) setUpdates(result);
-    }).catch(() => undefined);
-  }, [session?.authenticated, selectedDeviceId]);
+    void loadUpdates(currentId).catch(() => undefined);
+  }, [session?.authenticated, selectedDeviceId, loadUpdates]);
+
+  useEffect(() => {
+    if (!session?.authenticated || (!deviceSnapshotReadAt && !updatesSnapshotReadAt)) return;
+    const activeReads = [deviceSnapshotReadAt, updatesSnapshotReadAt]
+      .filter((value): value is number => value !== null && freshnessClock - value < FIRMWARE_READ_MAX_AGE_MS);
+    if (!activeReads.length) return;
+    const expiresAt = Math.min(...activeReads) + FIRMWARE_READ_MAX_AGE_MS;
+    const timer = window.setTimeout(() => setFreshnessClock(Date.now()), Math.max(0, expiresAt - Date.now() + 1));
+    return () => window.clearTimeout(timer);
+  }, [session?.authenticated, deviceSnapshotReadAt, updatesSnapshotReadAt, freshnessClock]);
 
   useEffect(() => {
     const handler = () => {
@@ -247,6 +285,9 @@ function AppContent() {
       selectionEpoch.current++;
       setSelectedDeviceId("");
       setEnvelope(null);
+      setDeviceSnapshotReadAt(null);
+      setUpdatesSnapshotReadAt(null);
+      setUpdates(null);
       setDraft(null);
       draftRef.current = null;
       dirtyRef.current = false;
@@ -308,12 +349,15 @@ function AppContent() {
     if (dirtyRef.current && !window.confirm(t("Есть несохранённые изменения. Переключить дисплей и отменить их?"))) return;
     clearProfileDraft();
     requestSequence.current++;
+    updatesRequestSequence.current++;
     selectionEpoch.current++;
     selectedDeviceRef.current = deviceId;
     setSelectedDeviceId(deviceId);
     updateDeviceQuery(deviceId);
     setEnvelope(null);
     setUpdates(null);
+    setDeviceSnapshotReadAt(null);
+    setUpdatesSnapshotReadAt(null);
     setCommand(null);
     setSaveState("idle");
     saveStateRevisionRef.current = null;
@@ -343,6 +387,19 @@ function AppContent() {
       if (validation.field === "interval_seconds" && section === "screen") setSection("photos");
       setInvalidTiming(validation.field);
       return validation.message;
+    }
+    const entityLengthError = homeEntityLengthError(draft.services.home, envelope.settings.services.home);
+    if (entityLengthError) {
+      const message = t(entityLengthError);
+      setAlert({ kind: "error", text: message });
+      setSection("services");
+      return message;
+    }
+    if (hasUnresolvedHomeFavorite(draft.services.home, envelope.settings.services.home)) {
+      const message = t("Удалите связанное избранное или верните сущность в выбор перед сохранением.");
+      setAlert({ kind: "error", text: message });
+      setSection("services");
+      return message;
     }
     const epoch = selectionEpoch.current;
     const sentSettings = clone(draft);
@@ -555,11 +612,14 @@ function AppContent() {
   if (!session.authenticated) return <Login session={session} onLogin={(value) => { api.setCsrf(value.csrf_token); setSession(value); setAlert(null); }} />;
 
   const dirtySecrets = Object.keys(networkCredentials).length > 0;
+  const firmwareObservationFresh = deviceSnapshotReadAt !== null && updatesSnapshotReadAt !== null &&
+    freshnessClock - deviceSnapshotReadAt < FIRMWARE_READ_MAX_AGE_MS &&
+    freshnessClock - updatesSnapshotReadAt < FIRMWARE_READ_MAX_AGE_MS;
   const pendingCommand = !isCommandFinal(command);
   const pageProps: PageProps | null = envelope && draft ? {
     draft, edit, envelope, deviceId: selectedDeviceId, onOpenConnections: openConnections,
     setServiceDetail, serviceDetail, setNetworkCredentials: (updater) => { formEditSequence.current++; setNetworkCredentials(updater); dirtyRef.current = true; setDirty(true); },
-    networkCredentials, networkEditing, setNetworkEditing, updates, command, pendingCommand,
+    networkCredentials, networkEditing, setNetworkEditing, updates, firmwareObservationFresh, command, pendingCommand,
     ask: setConfirm, busy, save, dirty, identity: session.identity,
     refreshStatus: refreshSelectedStatus,
     downloadDiagnostics: async () => {

@@ -152,6 +152,9 @@ export class AdminApi {
   catalog(deviceId: string, kind: "albums" | "calendars") {
     return this.request<Catalog>(this.devicePath(deviceId, kind));
   }
+  entities(deviceId: string) {
+    return this.request<Catalog>(this.devicePath(deviceId, "entities"));
+  }
   updates(deviceId: string) {
     return this.request<UpdateInfo>(this.devicePath(deviceId, "updates"));
   }

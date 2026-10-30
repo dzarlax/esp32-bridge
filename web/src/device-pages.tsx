@@ -29,6 +29,7 @@ export function UpdatesPage({
   edit,
   envelope,
   updates,
+  firmwareObservationFresh,
   command,
   pendingCommand,
   ask,
@@ -36,13 +37,18 @@ export function UpdatesPage({
 }: PageProps) {
   const t = useT();
   const { locale } = useLocale();
-  const currentVersion =
-    updates?.current_version || envelope.device.firmware || "";
+  const snapshotsConflict = firmwareObservationFresh && updates?.device_connected === true && envelope.device.connected === true &&
+    !!updates?.current_version && !!envelope.device.firmware && !sameFirmwareVersion(updates.current_version, envelope.device.firmware);
+  const onlineObservation = firmwareObservationFresh && updates?.device_connected === true && envelope.device.connected === true && !snapshotsConflict;
+  const observedVersion = updates?.current_version || envelope.device.firmware || "";
+  const currentVersion = observedVersion;
   const available = updates?.available_version || "";
+  const installedMatchesAvailable = hasCurrentFirmwareObservation(onlineObservation, currentVersion, available, envelope.device.firmware);
+  const latestAttemptInstalled = onlineObservation && !!updates?.history?.[0]?.version && sameFirmwareVersion(currentVersion, updates.history[0].version);
   return (
     <div className="content-narrow">
       <section className="settings-section">
-        <SectionHeading>{t("Установленная версия")}</SectionHeading>
+        <SectionHeading>{t("Текущая версия дисплея")}</SectionHeading>
         <div className="version-card">
           <div>
             <small>{t("Текущая версия")}</small>
@@ -51,14 +57,19 @@ export function UpdatesPage({
             </strong>
             {currentVersion && (
               <StatusPill
-                state={available && updates?.update_available ? "warn" : "good"}
+                state={!onlineObservation ? "muted" : available && updates?.update_available && !installedMatchesAvailable ? "warn" : "good"}
                 label={
-                  available && updates?.update_available
+                  !onlineObservation
+                    ? t("Последняя известная версия")
+                    : available && updates?.update_available && !installedMatchesAvailable
               ? t("Доступно обновление")
               : t("Версия установлена")
                 }
               />
             )}
+            {!onlineObservation && currentVersion && <small>{t(envelope.device.connected ? "Показана последняя известная версия; актуальность не подтверждена" : "Показана последняя известная версия; дисплей не в сети")}</small>}
+            {snapshotsConflict && <small>{t("Последние ответы Bridge расходятся по версии")}</small>}
+            {latestAttemptInstalled && <small>{t("Версия подтверждена текущим ответом дисплея")}</small>}
           </div>
           <div>
             <small>{t("Дисплей")}</small>
@@ -80,7 +91,7 @@ export function UpdatesPage({
           >
             <Icon name="refresh" size={18} /> {" "}{t("Проверить обновления")}{" "}</button>
         </div>
-        {available && updates?.update_available && (
+        {available && updates?.update_available && !installedMatchesAvailable && !snapshotsConflict && (
           <div className="update-available">
             <span>{t("Доступна версия")}</span>
             <strong>{available}</strong>
@@ -102,6 +113,7 @@ export function UpdatesPage({
               {" "}{t("Установить…")}{" "}</button>
           </div>
         )}
+        {installedMatchesAvailable && <p className="muted">{t("Доступное обновление уже установлено")}</p>}
       </section>
       <section className="settings-section">
         <SectionHeading>{t("Автоматические действия")}</SectionHeading>
@@ -144,7 +156,7 @@ export function UpdatesPage({
       <section className="settings-section">
         <SectionHeading>{t("Состояние команды")}</SectionHeading>
         {command ? (
-          <CommandCard command={command} />
+          <CommandCard command={command} online={onlineObservation} currentVersion={currentVersion} />
         ) : (
           <p className="muted">{t("Нет активных или последних команд.")}</p>
         )}
@@ -203,7 +215,21 @@ export function UpdatesPage({
     </div>
   );
 }
-function CommandCard({ command }: { command: Command }) {
+
+export function sameFirmwareVersion(left: string, right: string) {
+  const normalize = (value: string) => value.trim().replace(/^[vV]/, "");
+  return !!normalize(left) && normalize(left) === normalize(right);
+}
+export function hasCurrentFirmwareObservation(online: boolean, current: string, target: string, envelopeVersion = "") {
+  return online && (!envelopeVersion || !current || sameFirmwareVersion(current, envelopeVersion)) && sameFirmwareVersion(current, target);
+}
+export function shouldShowCommandError(command: Command, online: boolean, current: string) {
+  return !(command.action === "ota_install" && (
+    ["interrupted", "expired"].includes(command.state) ||
+    hasCurrentFirmwareObservation(online, current, command.target_version || "")
+  ));
+}
+function CommandCard({ command, online = false, currentVersion = "" }: { command: Command; online?: boolean; currentVersion?: string }) {
   const t = useT();
   const { locale } = useLocale();
   const state =
@@ -239,13 +265,14 @@ function CommandCard({ command }: { command: Command }) {
         />
       </div>
       <small>{t("Создана")}{" "}{new Date(command.created_at).toLocaleString(dateLocale(locale))}</small>
-      {command.error && <p className="error-text">{t(errorMessage(command.error, "Дисплей не смог выполнить команду. Повторите попытку после подключения устройства."))}</p>}
+      {command.error && shouldShowCommandError(command, online, currentVersion) && <p className="error-text">{t(errorMessage(command.error, "Дисплей не смог выполнить команду. Повторите попытку после подключения устройства."))}</p>}
     </div>
   );
 }
 
 export function DevicePage({
   envelope,
+  firmwareObservationFresh,
   command,
   pendingCommand,
   ask,
@@ -355,7 +382,7 @@ export function DevicePage({
               <Icon name="trash" size={18} /> {" "}{t("Сбросить настройки дисплея…")}{" "}</button>
           </div>
         </div>
-        {pendingCommand && command && <CommandCard command={command} />}
+        {pendingCommand && command && <CommandCard command={command} online={firmwareObservationFresh && d.connected} currentVersion={d.firmware} />}
       </section>
       <section className="settings-section">
         <SectionHeading>{t("Возможности устройства")}</SectionHeading>

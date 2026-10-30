@@ -216,7 +216,7 @@ func (a *API) deviceRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	id := parts[0]
 	switch parts[1] {
-	case "albums", "calendars":
+	case "albums", "calendars", "entities":
 		a.catalog(w, r, id, parts[1])
 	case "settings":
 		a.deviceSettings(w, r, id)

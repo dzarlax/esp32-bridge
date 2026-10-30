@@ -5,6 +5,19 @@ export const UI_LOCALES: readonly UILocale[] = ["ru", "en", "sr-Latn"];
 const storageKey = "homedash.ui.locale";
 
 const enCatalog = {
+  "Выбор сущностей Home Assistant": "Home Assistant entity selection",
+  "Тип сущности": "Entity type",
+  "Недоступна в Home Assistant": "Unavailable in Home Assistant",
+  "Удалите связанное избранное или верните сущность в выбор перед сохранением.": "A favorite uses entities that are no longer selected. Remove the favorite or restore the entity selection before saving.",
+  "Версия подтверждена текущим ответом дисплея": "Current display telemetry confirms this version is installed",
+  "Показана последняя известная версия; дисплей не в сети": "Showing the last known version; the display is offline",
+  "Доступное обновление уже установлено": "The available update is already installed",
+  "Текущая версия дисплея": "Current display version",
+  "Последняя известная версия": "Last known version",
+  "Показана последняя известная версия; актуальность не подтверждена": "Showing the last known version; freshness is unconfirmed",
+  "Последние ответы Bridge расходятся по версии": "The latest Bridge responses disagree on the firmware version",
+  "ID сущности превышает ограничение устройства": "The entity ID exceeds the device limit",
+  "Home Assistant entity ID exceeds device limit": "A Home Assistant entity ID exceeds the device limit",
   "Поиск по имени или ID": "Search by name or ID",
   "Обновить список": "Refresh list",
   "Ничего не найдено.": "No matches found.",
@@ -451,6 +464,19 @@ const enCatalog = {
 type MessageKey = keyof typeof enCatalog;
 
 const srCatalog = {
+  "Выбор сущностей Home Assistant": "Izbor Home Assistant entiteta",
+  "Тип сущности": "Tip entiteta",
+  "Недоступна в Home Assistant": "Nije dostupno u Home Assistant-u",
+  "Удалите связанное избранное или верните сущность в выбор перед сохранением.": "Omiljena stavka koristi entitet koji više nije izabran. Uklonite omiljenu stavku ili vratite izbor entiteta pre čuvanja.",
+  "Версия подтверждена текущим ответом дисплея": "Trenutni podaci ekrana potvrđuju da je ova verzija instalirana",
+  "Показана последняя известная версия; дисплей не в сети": "Prikazana je poslednja poznata verzija; ekran nije na mreži",
+  "Доступное обновление уже установлено": "Dostupno ažuriranje je već instalirano",
+  "Текущая версия дисплея": "Trenutna verzija ekrana",
+  "Последняя известная версия": "Poslednja poznata verzija",
+  "Показана последняя известная версия; актуальность не подтверждена": "Prikazana je poslednja poznata verzija; aktuelnost nije potvrđena",
+  "Последние ответы Bridge расходятся по версии": "Najnoviji Bridge odgovori se ne slažu oko verzije firmvera",
+  "ID сущности превышает ограничение устройства": "ID entiteta prelazi ograničenje uređaja",
+  "Home Assistant entity ID exceeds device limit": "ID Home Assistant entiteta prelazi ograničenje uređaja",
   "Поиск по имени или ID": "Pretraži po nazivu ili ID-u",
   "Обновить список": "Osveži listu",
   "Ничего не найдено.": "Nema rezultata.",

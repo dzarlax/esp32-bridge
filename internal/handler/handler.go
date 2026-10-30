@@ -46,6 +46,8 @@ type Handler struct {
 	otaMu            sync.Mutex
 }
 
+const calendarStateHeader = "X-HomeDash-Calendar-State"
+
 func New(orch *fetcher.Orchestrator, apiKey, haBaseURL, haToken string, haLights, haClimates []string, haClient *http.Client) *Handler {
 	allowedLights := make(map[string]struct{}, len(haLights))
 	for _, id := range haLights {
@@ -296,12 +298,14 @@ func (h *Handler) Calendar(w http.ResponseWriter, r *http.Request) {
 	}
 	dayEnd := dayStart.AddDate(0, 0, 1)
 	if h.calendarPlatformEnabled() {
-		events, err := h.fetchCalendarPlatformEvents(r, dayStart, dayEnd)
+		complete := false
+		events, err := h.fetchCalendarPlatformEvents(r, dayStart, dayEnd, &complete)
 		if err != nil {
 			log.Printf("[calendar] Calendar Platform error: %v", err)
 			http.Error(w, `{"error":"calendar source unavailable"}`, http.StatusBadGateway)
 			return
 		}
+		setCalendarState(w, complete)
 		writeCalendarEvents(w, events)
 		return
 	}
@@ -320,9 +324,11 @@ func (h *Handler) Calendar(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Phase 2: fetch events from each calendar in parallel
-	var allEvents []model.CalendarEvent
+	allEvents := make([]model.CalendarEvent, 0)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
+	var failed int
+	var succeeded int
 
 	for calIdx, calID := range calendars {
 		wg.Add(1)
@@ -331,16 +337,33 @@ func (h *Handler) Calendar(w http.ResponseWriter, r *http.Request) {
 			events, err := h.fetchCalendarEvents(r, entityID, date, nextDay, idx)
 			if err != nil {
 				log.Printf("[calendar] events error for %s: %v", entityID, err)
+				mu.Lock()
+				failed++
+				mu.Unlock()
 				return
 			}
 			mu.Lock()
+			succeeded++
 			allEvents = append(allEvents, events...)
 			mu.Unlock()
 		}(calIdx, calID)
 	}
 	wg.Wait()
+	if failed > 0 && succeeded == 0 && len(calendars) > 0 {
+		http.Error(w, `{"error":"calendar source unavailable"}`, http.StatusBadGateway)
+		return
+	}
+	setCalendarState(w, failed == 0)
 
 	writeCalendarEvents(w, allEvents)
+}
+
+func setCalendarState(w http.ResponseWriter, complete bool) {
+	if complete {
+		w.Header().Set(calendarStateHeader, "complete")
+		return
+	}
+	w.Header().Set(calendarStateHeader, "partial")
 }
 
 func writeCalendarEvents(w http.ResponseWriter, events []model.CalendarEvent) {
@@ -377,7 +400,7 @@ type calendarPlatformEvent struct {
 	End        calendarPlatformEventTime `json:"end"`
 }
 
-func (h *Handler) fetchCalendarPlatformRaw(r *http.Request, dayStart, dayEnd time.Time, strict bool) ([]calendarPlatformEvent, error) {
+func (h *Handler) fetchCalendarPlatformRaw(r *http.Request, dayStart, dayEnd time.Time, strict bool, completeness ...*bool) ([]calendarPlatformEvent, error) {
 	u, err := url.Parse(h.calendarPlatformBaseURL + "/api/native/v1/cached-events")
 	if err != nil {
 		return nil, err
@@ -414,6 +437,11 @@ func (h *Handler) fetchCalendarPlatformRaw(r *http.Request, dayStart, dayEnd tim
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload); err != nil {
 		return nil, err
 	}
+	for _, result := range completeness {
+		if result != nil {
+			*result = payload.Complete
+		}
+	}
 	if !payload.Complete {
 		log.Printf("[calendar] Calendar Platform returned a partial result")
 	}
@@ -439,8 +467,8 @@ func (h *Handler) fetchCalendarPlatformRaw(r *http.Request, dayStart, dayEnd tim
 	return payload.Items, nil
 }
 
-func (h *Handler) fetchCalendarPlatformEvents(r *http.Request, dayStart, dayEnd time.Time) ([]model.CalendarEvent, error) {
-	items, err := h.fetchCalendarPlatformRaw(r, dayStart, dayEnd, false)
+func (h *Handler) fetchCalendarPlatformEvents(r *http.Request, dayStart, dayEnd time.Time, completeness ...*bool) ([]model.CalendarEvent, error) {
+	items, err := h.fetchCalendarPlatformRaw(r, dayStart, dayEnd, false, completeness...)
 	if err != nil {
 		return nil, err
 	}

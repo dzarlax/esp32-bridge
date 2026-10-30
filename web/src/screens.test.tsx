@@ -121,6 +121,7 @@ function pageProps(): PageProps {
     networkEditing: true,
     setNetworkEditing: vi.fn(),
     updates: null,
+    firmwareObservationFresh: false,
     command: null,
     pendingCommand: false,
     ask: vi.fn(),
