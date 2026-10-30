@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	_ "time/tzdata"
 )
 
 func run(args []string) error {
