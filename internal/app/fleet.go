@@ -97,6 +97,21 @@ func (f *Fleet) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	m := state.nodes[id]
+	// Firmware recovery must remain available before the first successful sync.
+	// Only the shared firmware endpoints may use the legacy runtime here; their
+	// handlers still authenticate the API key and never register a profile.
+	if m == nil && (r.URL.Path == "/api/ota/check" || r.URL.Path == "/api/ota/firmware") {
+		if r.Header.Get("X-API-Key") == "" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		m = state.nodes[""]
+	}
 	if m == nil {
 		http.Error(w, "device must sync first", http.StatusNotFound)
 		return

@@ -126,6 +126,12 @@ network/Bridge verification. Probe does not assume the candidate has this profil
 
 All normal native API requests (dashboard/calendar/HA/photo manifest/frame/OTA)
 include device ID. Their router selects the profile-specific prepared runtime.
+An unregistered, syntactically valid device ID may use only GET /api/ota/check
+and GET /api/ota/firmware through the legacy shared firmware handler. Both still
+require the native API key in X-API-Key (never a query-string key for bootstrap).
+These reads never create a profile or apply settings;
+dashboard, calendar, home actions and photos remain unavailable until sync.
+Malformed identities remain rejected. Registered devices retain their runtime.
 Photo frames advertised to A must not be borrowed from B's collection. Headerless
 legacy requests keep the legacy default. Raw RGB565 payload protocol stays unchanged.
 Photo preparation is bounded globally; cap default managed devices8 and use16
