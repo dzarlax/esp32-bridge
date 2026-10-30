@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ConnectionsEnvelope, SharedConnections, SecretKey } from "./types";
 import { Field, Icon, SectionHeading, TextInput } from "./ui";
+import { useT } from "./i18n";
 
 type Secrets = Partial<Record<SecretKey, string | null>>;
 type Props = {
@@ -35,6 +36,7 @@ function cloneConnections(value: SharedConnections): SharedConnections {
 }
 
 export function ConnectionsPage({ value, onSave, onDirtyChange }: Props) {
+  const t = useT();
   const [draft, setDraft] = useState(() => cloneConnections(value.connections));
   const [secrets, setSecrets] = useState<Secrets>({});
   const [baseRevision, setBaseRevision] = useState(value.revision);
@@ -148,19 +150,18 @@ export function ConnectionsPage({ value, onSave, onDirtyChange }: Props) {
     <div className="connections-page">
       <div className="scope-notice" role="note">
         <Icon name="info" size={18} />
-        <span><strong>Общие подключения</strong> применяются ко всем дисплеям. Изменение адреса или удаление ключа может отключить источник на нескольких устройствах.</span>
+        <span><strong>{t("Общие подключения")}</strong> {" "}{t("применяются ко всем дисплеям. Изменение адреса или удаление ключа может отключить источник на нескольких устройствах.")}</span>
       </div>
       {conflict && (
         <div className="alert error" role="alert">
-          Подключения изменились в другом сеансе. Ваши изменения сохранены в форме.
-          <button className="button secondary" type="button" onClick={reset}>Загрузить актуальные данные</button>
+          {" "}{t("Подключения изменились в другом сеансе. Ваши изменения сохранены в форме.")}{" "}<button className="button secondary" type="button" onClick={reset}>{t("Загрузить актуальные данные")}</button>
         </div>
       )}
-      {error && <div className="alert error" role="alert">{error}</div>}
-      {saved && <div className="alert success" role="status">Общие подключения сохранены. Изменения затрагивают все дисплеи.</div>}
+      {error && <div className="alert error" role="alert">{t(error)}</div>}
+      {saved && <div className="alert success" role="status">{t("Общие подключения сохранены. Изменения затрагивают все дисплеи.")}</div>}
       <form onSubmit={submit}>
         <section className="settings-section">
-          <SectionHeading>Адреса источников</SectionHeading>
+          <SectionHeading>{t("Адреса источников")}</SectionHeading>
           {URL_FIELDS.map(([key, title, label]) => (
             <Field key={key} label={label} help={`${title}: общий адрес подключения для всех дисплеев.`}>
               <TextInput
@@ -178,7 +179,7 @@ export function ConnectionsPage({ value, onSave, onDirtyChange }: Props) {
           ))}
         </section>
         <section className="settings-section">
-          <SectionHeading>Ключи и токены</SectionHeading>
+          <SectionHeading>{t("Ключи и токены")}</SectionHeading>
           {SECRET_FIELDS.map(({ key, title, label }) => {
             const present = Boolean(value.secrets_present[key]);
             const removed = secrets[key] === null;
@@ -189,7 +190,7 @@ export function ConnectionsPage({ value, onSave, onDirtyChange }: Props) {
                     type="password"
                     value={typeof secrets[key] === "string" ? secrets[key] as string : ""}
                     autoComplete="new-password"
-                    placeholder={present && !removed ? "Ключ сохранён — введите замену" : "Введите ключ или токен"}
+                    placeholder={t(present && !removed ? "Ключ сохранён — введите замену" : "Введите ключ или токен")}
                     aria-label={label}
                     onChange={(event) => {
                       const next = { ...secrets, [key]: event.target.value };
@@ -198,10 +199,10 @@ export function ConnectionsPage({ value, onSave, onDirtyChange }: Props) {
                       setSaved(false);
                     }}
                   />
-                  <span className={`badge ${present && !removed ? "good" : "muted"}`}>{removed ? "Будет удалён" : present ? "Сохранён" : "Не задан"}</span>
+                  <span className={`badge ${present && !removed ? "good" : "muted"}`}>{t(removed ? "Будет удалён" : present ? "Сохранён" : "Не задан")}</span>
                   {present && (
                     <button className="button quiet" type="button" onClick={() => setSecrets((old) => ({ ...old, [key]: removed ? "" : null }))}>
-                      {removed ? "Отменить удаление" : "Удалить"}
+                      {t(removed ? "Отменить удаление" : "Удалить")}
                     </button>
                   )}
                 </div>
@@ -210,10 +211,10 @@ export function ConnectionsPage({ value, onSave, onDirtyChange }: Props) {
           })}
         </section>
         <div className="connection-actions">
-          <span>{dirty ? "Есть несохранённые общие изменения" : "Все дисплеи используют сохранённые подключения"}</span>
+          <span>{t(dirty ? "Есть несохранённые общие изменения" : "Все дисплеи используют сохранённые подключения")}</span>
           <div>
-            <button className="button secondary" type="button" onClick={reset} disabled={!dirty || busy}>Отменить</button>
-            <button className="button primary" type="submit" disabled={!dirty || busy || conflict}>{busy ? "Сохранение…" : "Сохранить подключения"}</button>
+            <button className="button secondary" type="button" onClick={reset} disabled={!dirty || busy}>{t("Отменить")}</button>
+            <button className="button primary" type="submit" disabled={!dirty || busy || conflict}>{t(busy ? "Сохранение…" : "Сохранить подключения")}</button>
           </div>
         </div>
       </form>
@@ -221,11 +222,11 @@ export function ConnectionsPage({ value, onSave, onDirtyChange }: Props) {
         <div className="modal-backdrop" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) setConfirmDisconnect(false); }}>
           <section className="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="disconnect-title" aria-describedby="disconnect-description" ref={dialogRef} tabIndex={-1}>
             <div className="dialog-icon danger"><Icon name="info" size={24} /></div>
-            <h2 id="disconnect-title">Отключить общий источник?</h2>
-            <p id="disconnect-description">Удаление адреса или ключа повлияет на все дисплеи, которые используют это подключение. Выбранные источники на затронутых дисплеях будут отключены.</p>
+            <h2 id="disconnect-title">{t("Отключить общий источник?")}</h2>
+            <p id="disconnect-description">{t("Удаление адреса или ключа повлияет на все дисплеи, которые используют это подключение. Выбранные источники на затронутых дисплеях будут отключены.")}</p>
             <div className="button-row">
-              <button ref={dialogCancelRef} className="button secondary" type="button" onClick={() => setConfirmDisconnect(false)}>Вернуться к форме</button>
-              <button className="button danger" type="button" disabled={busy} onClick={() => void persist(true)}>Подтвердить отключение</button>
+              <button ref={dialogCancelRef} className="button secondary" type="button" onClick={() => setConfirmDisconnect(false)}>{t("Вернуться к форме")}</button>
+              <button className="button danger" type="button" disabled={busy} onClick={() => void persist(true)}>{t("Подтвердить отключение")}</button>
             </div>
           </section>
         </div>

@@ -1617,3 +1617,37 @@ input[aria-invalid="true"] {
   color: var(--muted);
   white-space: nowrap;
 }
+.language-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+.language-select select {
+  min-height: 36px;
+  max-width: 145px;
+  padding: 5px 26px 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 0.88rem;
+}
+.login-card .language-select {
+  justify-content: flex-end;
+  margin-bottom: 14px;
+}
+.header-meta .language-select {
+  align-self: center;
+}
+.field-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.83rem;
+}
+@media (max-width: 760px) {
+  .language-select > span { display: none; }
+  .header-meta .language-select select { min-height: 32px; }
+}

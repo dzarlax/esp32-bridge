@@ -203,10 +203,16 @@ export function isRevisionConflict(error: unknown): boolean {
 
 function normalizeEnvelope(envelope: Envelope): Envelope {
   const services = envelope.settings.services;
+  const screen = envelope.settings.screen ?? ({} as Envelope["settings"]["screen"]);
+  const locale = screen.locale;
   return {
     ...envelope,
     settings: {
       ...envelope.settings,
+      screen: {
+        ...screen,
+        locale: locale === "en" || locale === "sr-Latn" ? locale : "ru",
+      },
       services: {
         ...services,
         calendar: {
@@ -234,6 +240,16 @@ function normalizeEnvelope(envelope: Envelope): Envelope {
             : [],
         },
       },
+    },
+    capabilities: {
+      ...envelope.capabilities,
+      locales: Array.isArray(envelope.capabilities?.locales)
+        ? envelope.capabilities.locales.filter((value) => value === "ru" || value === "en" || value === "sr-Latn")
+        : ["ru", "en", "sr-Latn"],
+    },
+    device: {
+      ...envelope.device,
+      capabilities: Array.isArray(envelope.device?.capabilities) ? envelope.device.capabilities : [],
     },
   };
 }

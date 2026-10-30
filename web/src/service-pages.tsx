@@ -17,6 +17,7 @@ import {
   Toggle,
   tzLabel,
 } from "./ui";
+import { dateLocale, useLocale, useT } from "./i18n";
 
 function ServiceIcon({ name }: { name: keyof Settings["services"] }) {
   const map = {
@@ -52,6 +53,7 @@ function ServiceEditor({
   props: PageProps;
   titleId?: string;
 }) {
+  const t = useT();
   const { draft, edit, envelope } = props;
   const item = draft.services[id] as unknown as {
     enabled: boolean;
@@ -89,13 +91,13 @@ function ServiceEditor({
           <ServiceIcon name={id} />
         </span>
         <div>
-          <h2 id={titleId}>{serviceInfo[id].title}</h2>
-          <p>{serviceInfo[id].subtitle}</p>
+          <h2 id={titleId}>{t(serviceInfo[id].title)}</h2>
+          <p>{t(serviceInfo[id].subtitle)}</p>
         </div>
       </div>
       {id === "weather" && (
         <>
-          <Field label="Широта">
+          <Field label={t("Широта")}>
             <TextInput
               type="number"
               min={-90}
@@ -105,7 +107,7 @@ function ServiceEditor({
               onChange={(e) => update("latitude", Number(e.target.value))}
             />
           </Field>
-          <Field label="Долгота">
+          <Field label={t("Долгота")}>
             <TextInput
               type="number"
               min={-180}
@@ -115,9 +117,9 @@ function ServiceEditor({
               onChange={(e) => update("longitude", Number(e.target.value))}
             />
           </Field>
-          <Field label="Часовой пояс">
+          <Field label={t("Часовой пояс")}>
             <Timezone
-              label="Часовой пояс погоды"
+              label={t("Часовой пояс погоды")}
               value={item.timezone}
               options={envelope.capabilities.timezones}
               onChange={(value) => update("timezone", value)}
@@ -133,8 +135,8 @@ function ServiceEditor({
             onEdit={props.onOpenConnections}
           />
           <Field
-            label="Календари"
-            help="ID календарей, по одному на строку или через запятую."
+            label={t("Календари")}
+            help={t("ID календарей, по одному на строку или через запятую.")}
           >
             <textarea
               rows={3}
@@ -142,9 +144,9 @@ function ServiceEditor({
               onChange={(e) => list("ids", e.target.value)}
             />
           </Field>
-          <Field label="Часовой пояс">
+          <Field label={t("Часовой пояс")}>
             <Timezone
-              label="Часовой пояс календаря"
+              label={t("Часовой пояс календаря")}
               value={item.timezone}
               options={envelope.capabilities.timezones}
               onChange={(value) => update("timezone", value)}
@@ -155,13 +157,13 @@ function ServiceEditor({
       {id === "transport" && (
         <>
           <SharedConnectionField
-            label="Источник транспорта"
+            label={t("Источник транспорта")}
             value={item.base_url}
             onEdit={props.onOpenConnections}
           />
           <Field
-            label="Остановки"
-            help="ID остановок, по одному на строку или через запятую."
+            label={t("Остановки")}
+            help={t("ID остановок, по одному на строку или через запятую.")}
           >
             <textarea
               rows={3}
@@ -183,18 +185,18 @@ function ServiceEditor({
       {id === "tasks" && (
         <SharedConnectionField
           label="Todoist"
-          value={envelope.secrets_present.todoist_token ? "Ключ сохранён" : ""}
+          value={envelope.secrets_present.todoist_token ? t("Ключ сохранён") : ""}
           onEdit={props.onOpenConnections}
         />
       )}
       {id === "news" && (
         <>
           <SharedConnectionField
-            label="Источник новостей"
+            label={t("Источник новостей")}
             value={item.base_url}
             onEdit={props.onOpenConnections}
           />
-          <Field label="Количество элементов">
+          <Field label={t("Количество элементов")}>
             <TextInput
               type="number"
               min={1}
@@ -203,7 +205,7 @@ function ServiceEditor({
               onChange={(e) => update("limit", Number(e.target.value))}
             />
           </Field>
-          <Field label="Период новостей">
+          <Field label={t("Период новостей")}>
             <TextInput
               type="number"
               min={1}
@@ -229,7 +231,7 @@ function ServiceEditor({
                   field
                 ]
               }
-              help="ID сущностей, по одному на строку или через запятую."
+              help={t("ID сущностей, по одному на строку или через запятую.")}
             >
               <textarea
                 rows={3}
@@ -255,11 +257,12 @@ function Timezone({
   options: string[];
   onChange: (value: string) => void;
 }) {
+  const t = useT();
   return (
     <Select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)}>
       {options.map((tz) => (
         <option key={tz} value={tz}>
-          {tzLabel(tz)}
+          {tzLabel(tz, t)}
         </option>
       ))}
     </Select>
@@ -275,22 +278,24 @@ function SharedConnectionField({
   value: string;
   onEdit: () => void;
 }) {
+  const t = useT();
   return (
     <Field
       label={label}
-      help="Общее подключение для всех дисплеев. Изменить его можно в разделе «Общие подключения»."
+      help={t("Общее подключение для всех дисплеев. Изменить его можно в разделе «Общие подключения».")}
     >
       <div className="shared-connection-field">
-        <TextInput value={value || "Не настроено"} readOnly aria-label={`${label}, только чтение`} />
+        <TextInput value={value || t("Не настроено")} readOnly aria-label={`${label}, ${t("только чтение")}`} />
         <button className="button secondary" type="button" onClick={onEdit}>
-          Общие подключения
-        </button>
+          {" "}{t("Общие подключения")}{" "}</button>
       </div>
     </Field>
   );
 }
 
 export function ServicesPage(props: PageProps) {
+  const t = useT();
+  const { locale } = useLocale();
   const { draft, edit, envelope, serviceDetail, setServiceDetail } = props;
   const [mobileEditorOpen, setMobileEditorOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -317,7 +322,7 @@ export function ServicesPage(props: PageProps) {
   }, []);
   return (
     <div className="services-layout">
-      <div className="service-list" role="list" aria-label="Сервисы">
+      <div className="service-list" role="list" aria-label={t("Сервисы")}>
         {items.map((id) => {
           const setting = draft.services[id] as { enabled: boolean };
           const status = envelope.statuses[id];
@@ -334,24 +339,24 @@ export function ServicesPage(props: PageProps) {
               >
                 <ServiceIcon name={id} />
                 <span>
-                  <strong>{serviceInfo[id].title}</strong>
-                  <small>{serviceInfo[id].subtitle}</small>
+                  <strong>{t(serviceInfo[id].title)}</strong>
+                  <small>{t(serviceInfo[id].subtitle)}</small>
                 </span>
                 <span className="service-status">
-                  {servicePill(status)}
+                  {servicePill(status, t)}
                   {status?.last_success && (
                     <small>
-                      Последний ответ{" "}
-                      {new Date(status.last_success).toLocaleString()}
+                      {" "}{t("Последний ответ")}{" "}
+                      {new Date(status.last_success).toLocaleString(dateLocale(locale))}
                     </small>
                   )}
                   {status?.error && (
-                    <small className="error-text">{errorMessage(status.error, "Не удалось получить данные. Проверьте подключение к сервису в разделе «Общие подключения».")}</small>
+                    <small className="error-text">{t(errorMessage(status.error, "Не удалось получить данные. Проверьте подключение к сервису в разделе «Общие подключения».") )}</small>
                   )}
                 </span>
               </button>
               <Toggle
-                label="Показывать"
+                label={t("Показывать")}
                 checked={setting.enabled}
                 onChange={(value) =>
                   edit({
@@ -367,7 +372,7 @@ export function ServicesPage(props: PageProps) {
                 className="service-config"
                 onClick={(event) => selectService(id, event.currentTarget)}
               >
-                Настроить <span aria-hidden="true">›</span>
+                {" "}{t("Настроить")}{" "}<span aria-hidden="true">›</span>
               </button>
             </div>
           );
@@ -396,11 +401,12 @@ function ServiceVisibility({
   id: keyof Settings["services"];
   props: PageProps;
 }) {
+  const t = useT();
   const setting = props.draft.services[id] as { enabled: boolean };
   return (
     <div className="service-visibility">
       <Toggle
-        label="Показывать на дисплее"
+        label={t("Показывать на дисплее")}
         checked={setting.enabled}
         onChange={(value) =>
           props.edit({
@@ -427,6 +433,7 @@ function ServiceSheet({
   triggerRef: RefObject<HTMLButtonElement | null>;
   onClose: () => void;
 }) {
+  const t = useT();
   const dialogRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const [saveError, setSaveError] = useState("");
@@ -496,11 +503,11 @@ function ServiceSheet({
         tabIndex={-1}
       >
         <div className="service-sheet-header">
-          <span>Настройки сервиса</span>
+          <span>{t("Настройки сервиса")}</span>
           <button
             ref={closeRef}
             className="icon-button"
-            aria-label="Закрыть настройки сервиса"
+            aria-label={t("Закрыть настройки сервиса")}
             onClick={onClose}
           >
             <Icon name="close" size={20} />
@@ -515,26 +522,25 @@ function ServiceSheet({
           <ServiceVisibility id={id} props={props} />
           {saveError && (
             <div className="alert error" role="alert">
-              {saveError}
+              {t(saveError)}
             </div>
           )}
         </div>
         <footer className="service-sheet-footer">
           <span>
             {props.dirty
-              ? "Есть несохранённые изменения"
-              : "Изменений нет"}
+              ? t("Есть несохранённые изменения")
+              : t("Изменений нет")}
           </span>
           <div>
             <button className="button secondary" onClick={onClose}>
-              Закрыть
-            </button>
+              {" "}{t("Закрыть")}{" "}</button>
             <button
               className="button primary"
               disabled={!props.dirty || props.busy}
               onClick={() => void saveAndClose()}
             >
-              {props.busy ? "Сохранение…" : "Сохранить изменения"}
+              {props.busy ? t("Сохранение…") : t("Сохранить изменения")}
             </button>
           </div>
         </footer>
@@ -553,11 +559,13 @@ export function NetworkPage({
   setNetworkEditing,
   identity,
 }: PageProps) {
+  const t = useT();
   const change = (value: string) =>
     edit({ ...draft, network: { bridge_url: value } });
   const applyStatus = appliedSettingsStatus(
     envelope.device,
     envelope.revision,
+    t,
   );
   return (
     <div className="content-narrow">
@@ -566,19 +574,18 @@ export function NetworkPage({
           detail={
             <StatusPill
               state={envelope.device.connected ? "good" : "warn"}
-              label={envelope.device.connected ? "Подключён" : "Нет связи"}
+              label={envelope.device.connected ? t("Подключён") : t("Нет связи")}
             />
           }
         >
-          Wi-Fi дисплея
-        </SectionHeading>
+          {" "}{t("Wi-Fi дисплея")}{" "}</SectionHeading>
         <div className="readout">
-          <span>Текущая сеть (SSID)</span>
-          <strong>{envelope.device.ssid || "Не сообщается"}</strong>
+          <span>{t("Текущая сеть (SSID)")}</span>
+          <strong>{envelope.device.ssid || t("Не сообщается")}</strong>
         </div>
         <div className="readout">
-          <span>IP-адрес</span>
-          <strong>{envelope.device.ip || "Не сообщается"}</strong>
+          <span>{t("IP-адрес")}</span>
+          <strong>{envelope.device.ip || t("Не сообщается")}</strong>
         </div>
         {!networkEditing && (
           <button
@@ -586,12 +593,11 @@ export function NetworkPage({
             onClick={() => setNetworkEditing(true)}
             disabled={!canRun(envelope.device, "network")}
           >
-            Изменить сеть
-          </button>
+            {" "}{t("Изменить сеть")}{" "}</button>
         )}
         {networkEditing && (
           <div className="nested-form">
-            <Field label="Новая сеть Wi-Fi">
+            <Field label={t("Новая сеть Wi-Fi")}>
               <TextInput
                 value={networkCredentials.wifi_ssid ?? ""}
                 autoComplete="off"
@@ -605,8 +611,8 @@ export function NetworkPage({
               />
             </Field>
             <Field
-              label="Пароль Wi-Fi"
-              help="Оставьте пустым, чтобы не менять пароль."
+              label={t("Пароль Wi-Fi")}
+              help={t("Оставьте пустым, чтобы не менять пароль.")}
             >
               <TextInput
                 type="password"
@@ -629,13 +635,13 @@ export function NetworkPage({
           detail={
             <StatusPill
               state={envelope.device.connected ? "good" : "warn"}
-              label={envelope.device.connected ? "На связи" : "Не в сети"}
+              label={envelope.device.connected ? t("На связи") : t("Не в сети")}
             />
           }
         >
           Bridge
         </SectionHeading>
-        <Field label="Адрес Bridge">
+        <Field label={t("Адрес Bridge")}>
           <TextInput
             type="url"
             value={draft.network.bridge_url}
@@ -643,13 +649,12 @@ export function NetworkPage({
             onChange={(e) => change(e.target.value)}
           />
           <small>
-            Адрес будет применён устройством после успешной синхронизации.
-          </small>
+            {" "}{t("Адрес будет применён устройством после успешной синхронизации.")}{" "}</small>
         </Field>
         {networkEditing && (
           <Field
-            label="Ключ доступа Bridge"
-            help="Ключ не возвращается API. Пустое поле сохраняет действующий ключ."
+            label={t("Ключ доступа Bridge")}
+            help={t("Ключ не возвращается API. Пустое поле сохраняет действующий ключ.")}
           >
             <TextInput
               type="password"
@@ -667,11 +672,11 @@ export function NetworkPage({
         </div>
       </section>
       <section className="settings-section">
-        <SectionHeading>Доступ к панели</SectionHeading>
+        <SectionHeading>{t("Доступ к панели")}</SectionHeading>
         <div className="readout">
-          <span>Способ входа</span>
+          <span>{t("Способ входа")}</span>
           <strong>
-            {authMethodLabel(identity?.method)}
+            {authMethodLabel(identity?.method, t)}
             {identity?.email ? ` · ${identity.email}` : ""}
           </strong>
         </div>
@@ -679,11 +684,9 @@ export function NetworkPage({
       <div className="info-box">
         <Icon name="info" size={20} />
         <div>
-          <strong>Если дисплей не в сети</strong>
+          <strong>{t("Если дисплей не в сети")}</strong>
           <p>
-            Сохранённые сетевые данные применятся при следующем подключении. При
-            ошибке устройство должно восстановить прежнюю сеть.
-          </p>
+            {" "}{t("Сохранённые сетевые данные применятся при следующем подключении. При ошибке устройство должно восстановить прежнюю сеть.")}{" "}</p>
         </div>
       </div>
     </div>

@@ -12,6 +12,7 @@ import { NetworkPage, ServicesPage } from "./service-pages";
 import { PhotosPage, ScreenPage } from "./screen-photo-pages";
 import type { PageProps } from "./page-types";
 import type { Envelope, Settings } from "./types";
+import { LocaleProvider } from "./i18n";
 
 const initial: Settings = {
   screen: {
@@ -110,7 +111,7 @@ function pageProps(): PageProps {
     edit: vi.fn(),
     save: vi.fn().mockResolvedValue(null),
     dirty: false,
-    envelope,
+    envelope: structuredClone(envelope),
     deviceId: "a".repeat(32),
     onOpenConnections: vi.fn(),
     setServiceDetail: vi.fn(),
@@ -133,9 +134,60 @@ function pageProps(): PageProps {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  window.localStorage.clear();
 });
 
 describe("settings screen field interactions", () => {
+  it.each([
+    ["en", "Not reported", "No connection", "Offline"],
+    ["sr-Latn", "Nije prijavljeno", "Nema veze", "Van mreže"],
+  ] as const)("localizes empty network values and offline statuses in %s", (locale, empty, noConnection, offline) => {
+    const props = pageProps();
+    props.envelope.device.connected = false;
+    props.envelope.device.ssid = "";
+    props.envelope.device.ip = "";
+    window.localStorage.setItem("homedash.ui.locale", locale);
+    render(<LocaleProvider><NetworkPage {...props} /></LocaleProvider>);
+    expect(screen.getAllByText(empty)).toHaveLength(2);
+    expect(screen.getByText(noConnection)).toBeTruthy();
+    expect(screen.getByText(offline)).toBeTruthy();
+  });
+
+  it.each([
+    ["en", "Interrupted by restart"],
+    ["sr-Latn", "Prekinuto pri ponovnom pokretanju"],
+  ] as const)("localizes a rendered command status in %s", (locale, status) => {
+    const props = pageProps();
+    props.command = { id: "command-1", action: "restart", state: "interrupted", created_at: "2026-10-30T10:00:00Z", expires_at: "2026-10-30T10:05:00Z" };
+    window.localStorage.setItem("homedash.ui.locale", locale);
+    render(<LocaleProvider><UpdatesPage {...props} /></LocaleProvider>);
+    expect(screen.getByText(status)).toBeTruthy();
+  });
+
+  it.each([
+    ["en", "Calendar Platform, read only"],
+    ["sr-Latn", "Calendar Platform, samo za čitanje"],
+  ] as const)("localizes the shared-connection accessible name in %s", (locale, label) => {
+    const props = pageProps();
+    props.serviceDetail = "calendar";
+    window.localStorage.setItem("homedash.ui.locale", locale);
+    render(<LocaleProvider><ServicesPage {...props} /></LocaleProvider>);
+    expect(screen.getByLabelText(label)).toBeTruthy();
+  });
+
+  it.each([
+    ["en", "Shared Immich server, read only", "Not configured"],
+    ["sr-Latn", "Zajednički Immich server, samo za čitanje", "Nije podešeno"],
+  ] as const)("localizes the empty shared Immich server field in %s", (locale, label, value) => {
+    const props = pageProps();
+    props.draft.photos.source = "immich";
+    props.draft.photos.base_url = "";
+    window.localStorage.setItem("homedash.ui.locale", locale);
+    render(<LocaleProvider><PhotosPage {...props} /></LocaleProvider>);
+    const input = screen.getByLabelText(label) as HTMLInputElement;
+    expect(input.value).toBe(value);
+  });
+
   it("edits the display name", () => {
     const props = pageProps();
     render(<ScreenPage {...props} />);

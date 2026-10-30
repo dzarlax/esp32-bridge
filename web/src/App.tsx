@@ -22,9 +22,11 @@ import {
   type UpdateInfo,
 } from "./types";
 import { canRun, Field, Icon, type Ask, StatusPill, TextInput } from "./ui";
+import { LanguageSelect, LocaleProvider, useT } from "./i18n";
 
 const api = new AdminApi();
 function Login({ session, onLogin }: { session: Session; onLogin: (session: Session) => void }) {
+  const t = useT();
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -46,20 +48,26 @@ function Login({ session, onLogin }: { session: Session; onLogin: (session: Sess
   return (
     <main className="login-wrap">
       <form className="login-card" onSubmit={submit}>
+        <LanguageSelect />
         <div className="brand-mark"><Icon name="monitor" size={30} /></div>
         <h1>HomeDash</h1>
-        <p>Войдите, чтобы управлять настройками дисплеев.</p>
-        {session.password_enabled && <Field label="Пароль администратора"><TextInput autoFocus type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></Field>}
-        {error && <div className="alert error" role="alert">{error}</div>}
-        {session.password_enabled && <button className="button primary full" disabled={busy}>{busy ? "Вход…" : "Войти"}</button>}
-        {session.cloudflare_enabled && <a className="button secondary full" href="/api/admin/v1/auth/cloudflare"><Icon name="lock" size={17} /> Войти через Cloudflare Access</a>}
-        {!session.password_enabled && !session.cloudflare_enabled && <div className="alert error">Для панели не настроен способ входа.</div>}
+        <p>{t("Войдите, чтобы управлять настройками дисплеев.")}</p>
+        {session.password_enabled && <Field label={t("Пароль администратора")}><TextInput autoFocus type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></Field>}
+        {error && <div className="alert error" role="alert">{t(error)}</div>}
+        {session.password_enabled && <button className="button primary full" disabled={busy}>{busy ? t("Вход…") : t("Войти")}</button>}
+        {session.cloudflare_enabled && <a className="button secondary full" href="/api/admin/v1/auth/cloudflare"><Icon name="lock" size={17} /> {" "}{t("Войти через Cloudflare Access")}</a>}
+        {!session.password_enabled && !session.cloudflare_enabled && <div className="alert error">{t("Для панели не настроен способ входа.")}</div>}
       </form>
     </main>
   );
 }
 
 export default function App() {
+  return <LocaleProvider><AppContent /></LocaleProvider>;
+}
+
+function AppContent() {
+  const t = useT();
   const [session, setSession] = useState<Session | null>(null);
   const [sessionError, setSessionError] = useState("");
   const [devices, setDevices] = useState<DeviceList | null>(null);
@@ -243,7 +251,7 @@ export default function App() {
 
   function switchDevice(deviceId: string) {
     if (deviceId === selectedDeviceRef.current || busy) return;
-    if (dirtyRef.current && !window.confirm("Есть несохранённые изменения. Переключить дисплей и отменить их?")) return;
+    if (dirtyRef.current && !window.confirm(t("Есть несохранённые изменения. Переключить дисплей и отменить их?"))) return;
     clearProfileDraft();
     requestSequence.current++;
     selectionEpoch.current++;
@@ -344,15 +352,15 @@ export default function App() {
   }
 
   function navigate(to: SectionId) {
-    if (dirtyRef.current && !window.confirm("Есть несохранённые настройки дисплея. Перейти и отменить их?")) return;
-    if (connectionsDirtyRef.current && !window.confirm("Есть несохранённые общие подключения. Закрыть форму и отменить изменения?")) return;
+    if (dirtyRef.current && !window.confirm(t("Есть несохранённые настройки дисплея. Перейти и отменить их?"))) return;
+    if (connectionsDirtyRef.current && !window.confirm(t("Есть несохранённые общие подключения. Закрыть форму и отменить изменения?"))) return;
     if (dirtyRef.current) cancel();
     if (connectionsDirtyRef.current) connectionsDirtyRef.current = false;
     setSection(to); setShowConnections(false); setMobileNav(false); setAlert(null);
   }
 
   function openConnections() {
-    if (dirtyRef.current && !window.confirm("Есть несохранённые настройки дисплея. Открыть общие подключения и оставить черновик в текущем дисплее?")) return;
+    if (dirtyRef.current && !window.confirm(t("Есть несохранённые настройки дисплея. Открыть общие подключения и оставить черновик в текущем дисплее?"))) return;
     setShowConnections(true); setMobileNav(false); setAlert(null);
     void loadConnections().catch((reason) => setAlert({ kind: "error", text: reason instanceof Error ? reason.message : "Не удалось загрузить общие подключения" }));
   }
@@ -375,7 +383,7 @@ export default function App() {
     }
   }
 
-  if (!session) return sessionError ? <main className="login-wrap"><section className="login-card"><div className="brand-mark"><Icon name="monitor" size={30} /></div><h1>HomeDash</h1><div className="alert error" role="alert">{sessionError}</div><button className="button primary full" onClick={retrySession}>Повторить проверку сеанса</button></section></main> : <div className="loading-screen" role="status">Проверяем сеанс…</div>;
+  if (!session) return sessionError ? <main className="login-wrap"><section className="login-card"><div className="brand-mark"><Icon name="monitor" size={30} /></div><h1>HomeDash</h1><LanguageSelect /><div className="alert error" role="alert">{t(sessionError)}</div><button className="button primary full" onClick={retrySession}>{t("Повторить проверку сеанса")}</button></section></main> : <div className="loading-screen" role="status">{t("Проверяем сеанс…")}</div>;
   if (!session.authenticated) return <Login session={session} onLogin={(value) => { api.setCsrf(value.csrf_token); setSession(value); setAlert(null); }} />;
 
   const dirtySecrets = Object.keys(networkCredentials).length > 0;
@@ -399,34 +407,35 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <button className={`nav-scrim ${mobileNav ? "show" : ""}`} onClick={() => setMobileNav(false)} aria-label="Закрыть меню" tabIndex={mobileNav ? 0 : -1} />
+      <button className={`nav-scrim ${mobileNav ? "show" : ""}`} onClick={() => setMobileNav(false)} aria-label={t("Закрыть меню")} tabIndex={mobileNav ? 0 : -1} />
       <aside className={`sidebar ${mobileNav ? "open" : ""}`} inert={!mobileNav && window.matchMedia?.("(max-width: 760px)").matches ? true : undefined}>
-        <div className="sidebar-brand"><strong>HomeDash</strong><span>Настройки</span></div>
-        <nav aria-label="Разделы настроек">
-          {SECTION_LIST.map((item) => <button key={item.id} className={`nav-item ${!showConnections && section === item.id ? "active" : ""}`} aria-current={!showConnections && section === item.id ? "page" : undefined} onClick={() => navigate(item.id)}><Icon name={item.icon} /><span>{item.title}</span></button>)}
-          <button className={`nav-item global-nav ${showConnections ? "active" : ""}`} aria-current={showConnections ? "page" : undefined} onClick={openConnections}><Icon name="lock" /><span>Общие подключения</span></button>
+        <div className="sidebar-brand"><strong>HomeDash</strong><span>{t("Настройки")}</span></div>
+        <nav aria-label={t("Разделы настроек")}>
+          {SECTION_LIST.map((item) => <button key={item.id} className={`nav-item ${!showConnections && section === item.id ? "active" : ""}`} aria-current={!showConnections && section === item.id ? "page" : undefined} onClick={() => navigate(item.id)}><Icon name={item.icon} /><span>{t(item.title)}</span></button>)}
+          <button className={`nav-item global-nav ${showConnections ? "active" : ""}`} aria-current={showConnections ? "page" : undefined} onClick={openConnections}><Icon name="lock" /><span>{t("Общие подключения")}</span></button>
         </nav>
         <div className="sidebar-bottom">
-          {selectedProfile && envelope && <div className="device-mini"><span className="device-mini-icon"><Icon name="monitor" size={18} /></span><div><strong>{envelope.settings.screen.name || selectedProfile.name || "Дисплей"}</strong><span><StatusPill state={envelope.device.connected ? "good" : "warn"} label={envelope.device.connected ? "На связи" : "Не в сети"} /></span></div></div>}
-          <button className="logout-button" onClick={logout}><Icon name="logout" size={17} /> Завершить сеанс</button>
+          {selectedProfile && envelope && <div className="device-mini"><span className="device-mini-icon"><Icon name="monitor" size={18} /></span><div><strong>{envelope.settings.screen.name || selectedProfile.name || t("Дисплей")}</strong><span><StatusPill state={envelope.device.connected ? "good" : "warn"} label={envelope.device.connected ? t("На связи") : t("Не в сети")} /></span></div></div>}
+          <button className="logout-button" onClick={logout}><Icon name="logout" size={17} /> {" "}{t("Завершить сеанс")}</button>
         </div>
       </aside>
       <main className="main-content">
-        <header className="mobile-top"><button className="icon-button" aria-label="Открыть меню" onClick={() => setMobileNav(true)}>☰</button><strong>HomeDash</strong></header>
+        <header className="mobile-top"><button className="icon-button" aria-label={t("Открыть меню")} onClick={() => setMobileNav(true)}>☰</button><strong>HomeDash</strong></header>
         <div className="page-header">
-          <div><h1>{showConnections ? "Общие подключения" : devices && devices.devices.length === 0 ? "Подключение дисплея" : current.title}</h1><p>{showConnections ? "Параметры источников для всех дисплеев" : devices && devices.devices.length === 0 ? "Настройка первого дисплея" : current.subtitle}</p></div>
+          <div><h1>{t(showConnections ? "Общие подключения" : devices && devices.devices.length === 0 ? "Подключение дисплея" : current.title)}</h1><p>{t(showConnections ? "Параметры источников для всех дисплеев" : devices && devices.devices.length === 0 ? "Настройка первого дисплея" : current.subtitle)}</p></div>
           <div className="header-meta">
-            {devices && devices.devices.length > 0 && <label className="device-selector-label">Дисплей<select className="device-selector" aria-label="Выбрать дисплей" value={selectedDeviceId} disabled={busy} onChange={(event) => switchDevice(event.target.value)}>{devices.devices.map((device) => <option key={device.id} value={device.id}>{device.name || "Дисплей"}{device.connected ? " · На связи" : " · Не в сети"}</option>)}</select></label>}
-            {envelope && !showConnections && <StatusPill state={envelope.device.connected ? "good" : "warn"} label={envelope.device.connected ? "Дисплей на связи" : "Дисплей не в сети"} />}
+            <LanguageSelect />
+            {devices && devices.devices.length > 0 && <label className="device-selector-label">{t("Дисплей")}<select className="device-selector" aria-label={t("Выбрать дисплей")} value={selectedDeviceId} disabled={busy} onChange={(event) => switchDevice(event.target.value)}>{devices.devices.map((device) => <option key={device.id} value={device.id}>{device.name || t("Дисплей")}{device.connected ? ` · ${t("На связи")}` : ` · ${t("Не в сети")}`}</option>)}</select></label>}
+            {envelope && !showConnections && <StatusPill state={envelope.device.connected ? "good" : "warn"} label={envelope.device.connected ? t("Дисплей на связи") : t("Дисплей не в сети")} />}
           </div>
         </div>
-        {alert && <div className={`alert ${alert.kind}`} role={alert.kind === "error" ? "alert" : "status"}><span>{alert.text}</span><button className="icon-button small" aria-label="Закрыть сообщение" onClick={() => setAlert(null)}><Icon name="close" size={16} /></button></div>}
-        {!devices && <div className="loading-screen"><div className="spinner" />Загружаем дисплеи…</div>}
-        {devices && showConnections && (connections ? <ConnectionsPage value={connections} onSave={saveConnections} onDirtyChange={(value) => { connectionsDirtyRef.current = value; }} /> : <div className="loading-screen"><div className="spinner" />Загружаем общие подключения…</div>)}
+        {alert && <div className={`alert ${alert.kind}`} role={alert.kind === "error" ? "alert" : "status"}><span>{t(alert.text)}</span><button className="icon-button small" aria-label={t("Закрыть сообщение")} onClick={() => setAlert(null)}><Icon name="close" size={16} /></button></div>}
+        {!devices && <div className="loading-screen"><div className="spinner" />{t("Загружаем дисплеи…")}</div>}
+        {devices && showConnections && (connections ? <ConnectionsPage value={connections} onSave={saveConnections} onDirtyChange={(value) => { connectionsDirtyRef.current = value; }} /> : <div className="loading-screen"><div className="spinner" />{t("Загружаем общие подключения…")}</div>)}
         {devices && !showConnections && devices.devices.length === 0 && <EmptyDevices onOpenConnections={openConnections} />}
-        {devices && !showConnections && devices.devices.length > 0 && !pageProps && <div className="loading-screen"><div className="spinner" />Загружаем настройки дисплея…<button className="button secondary" onClick={() => selectedDeviceId && void loadDevice(selectedDeviceId).catch(() => undefined)}>Повторить</button></div>}
+        {devices && !showConnections && devices.devices.length > 0 && !pageProps && <div className="loading-screen"><div className="spinner" />{t("Загружаем настройки дисплея…")}<button className="button secondary" onClick={() => selectedDeviceId && void loadDevice(selectedDeviceId).catch(() => undefined)}>{t("Повторить")}</button></div>}
         {pageProps && !showConnections && <>
-          {conflict && <div className="alert error" role="alert"><span>Настройки этого дисплея изменились в другом сеансе. Черновик сохранён.</span><div className="conflict-actions"><button className="button secondary" onClick={cancel}>Загрузить актуальные и отменить черновик</button><button className="button primary" disabled={busy} onClick={() => { if (envelope) baseRevisionRef.current = envelope.revision; setConflict(false); void save(); }}>Сохранить черновик поверх текущей версии</button></div></div>}
+          {conflict && <div className="alert error" role="alert"><span>{t("Настройки этого дисплея изменились в другом сеансе. Черновик сохранён.")}</span><div className="conflict-actions"><button className="button secondary" onClick={cancel}>{t("Загрузить актуальные и отменить черновик")}</button><button className="button primary" disabled={busy} onClick={() => { if (envelope) baseRevisionRef.current = envelope.revision; setConflict(false); void save(); }}>{t("Сохранить черновик поверх текущей версии")}</button></div></div>}
           <div className="page-body" ref={settingsFieldsRef}>
             {section === "screen" && <ScreenPage {...pageProps} />}
             {section === "photos" && <PhotosPage {...pageProps} />}
@@ -435,8 +444,8 @@ export default function App() {
             {section === "updates" && <UpdatesPage {...pageProps} />}
             {section === "device" && <DevicePage {...pageProps} />}
           </div>
-          {dirty && <div className="sticky-save"><span>{dirtySecrets ? "Изменения не сохранены" : "Есть несохранённые изменения"}</span><div><button className="button secondary" onClick={cancel} disabled={busy}>Отменить</button><button className="button primary" onClick={() => void save()} disabled={busy}>{busy ? "Сохранение…" : "Сохранить изменения"}</button></div></div>}
-          <footer className="page-footer">Настройки сохраняются в Bridge. Применение на дисплее подтверждается отдельно.</footer>
+          {dirty && <div className="sticky-save"><span>{dirtySecrets ? t("Изменения не сохранены") : t("Есть несохранённые изменения")}</span><div><button className="button secondary" onClick={cancel} disabled={busy}>{t("Отменить")}</button><button className="button primary" onClick={() => void save()} disabled={busy}>{busy ? t("Сохранение…") : t("Сохранить изменения")}</button></div></div>}
+          <footer className="page-footer">{t("Настройки сохраняются в Bridge. Применение на дисплее подтверждается отдельно.")}</footer>
         </>}
       </main>
       {confirm && <ConfirmDialog ask={confirm} busy={busy} onClose={() => setConfirm(null)} onConfirm={() => doAction(confirm.action)} />}
@@ -445,7 +454,8 @@ export default function App() {
 }
 
 function EmptyDevices({ onOpenConnections }: { onOpenConnections: () => void }) {
-  return <section className="empty-devices"><div className="brand-mark"><Icon name="monitor" size={30} /></div><h2>Дисплеи ещё не подключены</h2><p>Подключите и настройте HomeDash Bridge и дисплей. При первом доверенном обмене устройство появится здесь автоматически.</p><ol><li>Запустите Bridge с включённой панелью управления.</li><li>Настройте Wi-Fi и адрес Bridge в дисплее, используя ключ устройства из своей локальной конфигурации.</li><li>После первой синхронизации обновите список. Ключ устройства не вводится и не хранится в браузере.</li></ol><button className="button secondary" onClick={() => window.location.reload()}>Обновить список дисплеев</button><button className="button primary" onClick={onOpenConnections}>Настроить общие подключения</button></section>;
+  const t = useT();
+  return <section className="empty-devices"><div className="brand-mark"><Icon name="monitor" size={30} /></div><h2>{t("Дисплеи ещё не подключены")}</h2><p>{t("Подключите и настройте HomeDash Bridge и дисплей. При первом доверенном обмене устройство появится здесь автоматически.")}</p><ol><li>{t("Запустите Bridge с включённой панелью управления.")}</li><li>{t("Настройте Wi-Fi и адрес Bridge в дисплее, используя ключ устройства из своей локальной конфигурации.")}</li><li>{t("После первой синхронизации обновите список. Ключ устройства не вводится и не хранится в браузере.")}</li></ol><button className="button secondary" onClick={() => window.location.reload()}>{t("Обновить список дисплеев")}</button><button className="button primary" onClick={onOpenConnections}>{t("Настроить общие подключения")}</button></section>;
 }
 
 function mergeSharedProjection(draft: Settings, latest: Settings): Settings {

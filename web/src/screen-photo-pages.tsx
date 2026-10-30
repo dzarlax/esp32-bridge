@@ -15,8 +15,10 @@ import {
   Toggle,
   tzLabel,
 } from "./ui";
+import { useT } from "./i18n";
 
 export function ScreenPage({ draft, edit, envelope }: PageProps) {
+  const t = useT();
   const idleHelp = useId();
   const s = draft.screen;
   const set = (key: keyof Settings["screen"], value: string | boolean) =>
@@ -24,59 +26,71 @@ export function ScreenPage({ draft, edit, envelope }: PageProps) {
   return (
     <>
       <section className="settings-section">
-        <SectionHeading>Устройство</SectionHeading>
-        <Field label="Имя дисплея">
+        <SectionHeading>{t("Устройство")}</SectionHeading>
+        <Field label={t("Имя дисплея")}>
           <TextInput
             value={s.name}
             maxLength={80}
             onChange={(e) => set("name", e.target.value)}
           />
         </Field>
+        <Field label={t("Язык дисплея")} help={!envelope.device.capabilities.includes("locale") ? t("Язык дисплея не поддерживается этой прошивкой.") : undefined}>
+          <Select
+            value={s.locale ?? "ru"}
+            disabled={!envelope.device.capabilities.includes("locale")}
+            onChange={(e) => set("locale", e.target.value)}
+          >
+            {(envelope.capabilities.locales ?? ["ru", "en", "sr-Latn"]).map((locale) => (
+              <option key={locale} value={locale}>{locale === "en" ? "English" : locale === "sr-Latn" ? "Srpski (latinica)" : t("Русский")}</option>
+            ))}
+          </Select>
+        </Field>
+        {envelope.device.applied_locale && <p className="field-note">{t("Применённый язык")}: {envelope.device.applied_locale === "en" ? "English" : envelope.device.applied_locale === "sr-Latn" ? "Srpski (latinica)" : t("Русский")}</p>}
       </section>
       <section className="settings-section">
-        <SectionHeading>Время и место</SectionHeading>
-        <Field label="Подпись города" help="Это подпись на экране, а не поиск города. Координаты погоды задаются в разделе «Данные и сервисы».">
+        <SectionHeading>{t("Время и место")}</SectionHeading>
+        <Field label={t("Подпись города")} help={t("Это подпись на экране, а не поиск города. Координаты погоды задаются в разделе «Данные и сервисы».")}>
           <TextInput
             value={s.city}
             maxLength={100}
             onChange={(e) => set("city", e.target.value)}
           />
         </Field>
-        <Field label="Часовой пояс">
+        <Field label={t("Часовой пояс")}>
           <Select
             value={s.timezone}
             onChange={(e) => set("timezone", e.target.value)}
           >
             {envelope.capabilities.timezones.map((tz) => (
               <option key={tz} value={tz}>
-                {tzLabel(tz)}
+                {tzLabel(tz, t)}
               </option>
             ))}
           </Select>
         </Field>
-        <Field label="Формат времени">
+        <Field label={t("Формат времени")}>
           <Segmented
             value={s.clock_format}
             options={[
-              ["24h", "24 часа"],
-              ["12h", "12 часов"],
+              ["24h", t("24 часа")],
+              ["12h", t("12 часов")],
             ]}
             onChange={(value) => set("clock_format", value)}
           />
         </Field>
       </section>
       <section className="settings-section">
-        <SectionHeading>Режим покоя</SectionHeading>
-        <Field label="При бездействии" help={<NumberHelp id={idleHelp} value={draft.photos.idle_seconds} {...photoTimingLimits.idle_seconds} />}>
+        <SectionHeading>{t("Режим покоя")}</SectionHeading>
+        <Field label={t("При бездействии")} help={<NumberHelp id={idleHelp} value={draft.photos.idle_seconds} {...photoTimingLimits.idle_seconds} />}>
           <span className="inline-row">
             <BoundedNumberInput
-              label="Задержка бездействия"
+              label={t("Задержка бездействия")}
               helpId={idleHelp}
               timing="idle_seconds"
               value={draft.photos.idle_seconds}
               min={photoTimingLimits.idle_seconds.min}
               max={photoTimingLimits.idle_seconds.max}
-              unit="сек"
+              unit={t("сек")}
               onChange={(value) =>
                 edit({
                   ...draft,
@@ -84,31 +98,31 @@ export function ScreenPage({ draft, edit, envelope }: PageProps) {
                 })
               }
             />
-            <span className="inline-label">затем</span>
+            <span className="inline-label">{t("затем")}</span>
             <Select
-              aria-label="Действие после бездействия"
+              aria-label={t("Действие после бездействия")}
               value={s.idle_action}
               onChange={(e) => set("idle_action", e.target.value)}
             >
-              <option value="photos">Фоторамка</option>
-              <option value="off">Выключить экран</option>
+              <option value="photos">{t("Фоторамка")}</option>
+              <option value="off">{t("Выключить экран")}</option>
             </Select>
           </span>
         </Field>
-        <Field label="Ночной режим">
+        <Field label={t("Ночной режим")}>
           <div className="night-row">
             <Toggle
               label={
                 s.night_enabled
-                  ? "Ночной режим включён"
-                  : "Ночной режим выключен"
+                  ? t("Ночной режим включён")
+                  : t("Ночной режим выключен")
               }
               checked={s.night_enabled}
               onChange={(value) => set("night_enabled", value)}
             />
             <TextInput
               type="time"
-              aria-label="Начало ночного режима"
+              aria-label={t("Начало ночного режима")}
               value={s.night_start}
               onChange={(e) => set("night_start", e.target.value)}
               disabled={!s.night_enabled}
@@ -116,16 +130,14 @@ export function ScreenPage({ draft, edit, envelope }: PageProps) {
             <span>—</span>
             <TextInput
               type="time"
-              aria-label="Конец ночного режима"
+              aria-label={t("Конец ночного режима")}
               value={s.night_end}
               onChange={(e) => set("night_end", e.target.value)}
               disabled={!s.night_enabled}
             />
           </div>
           <small>
-            Касание разбудит экран. Яркость недоступна: устройство не сообщает
-            эту возможность.
-          </small>
+            {" "}{t("Касание разбудит экран. Яркость недоступна: устройство не сообщает эту возможность.")}{" "}</small>
         </Field>
       </section>
       <section className="settings-section">
@@ -135,19 +147,18 @@ export function ScreenPage({ draft, edit, envelope }: PageProps) {
               state={envelope.capabilities.brightness ? "good" : "muted"}
               label={
                 envelope.capabilities.brightness
-                  ? "Поддерживается"
-                  : "Не поддерживается"
+                  ? t("Поддерживается")
+                  : t("Не поддерживается")
               }
             />
           }
         >
-          Яркость
-        </SectionHeading>
-        <Field label="Управление яркостью">
+          {" "}{t("Яркость")}{" "}</SectionHeading>
+        <Field label={t("Управление яркостью")}>
           <TextInput
             disabled
-            value="Недоступно для этого устройства"
-            aria-label="Яркость не поддерживается"
+            value={t("Недоступно для этого устройства")}
+            aria-label={t("Яркость не поддерживается")}
           />
         </Field>
       </section>
@@ -163,6 +174,7 @@ export function PhotosPage({
   runAction,
   busy,
 }: PageProps) {
+  const t = useT();
   const idleHelp = useId();
   const intervalHelp = useId();
   const p = draft.photos;
@@ -179,15 +191,14 @@ export function PhotosPage({
           detail={
             <Toggle
               label={
-                p.enabled ? "Фоторамка включена" : "Фоторамка выключена"
+                p.enabled ? t("Фоторамка включена") : t("Фоторамка выключена")
               }
               checked={p.enabled}
               onChange={(value) => set("enabled", value)}
             />
           }
         >
-          Источник фотографий
-        </SectionHeading>
+          {" "}{t("Источник фотографий")}{" "}</SectionHeading>
         <div className="photos-source-preview">
           <div className="photos-source-column">
             <div className="source-options">
@@ -208,8 +219,8 @@ export function PhotosPage({
                   <strong>Immich</strong>
                   <small>
                     {envelope.secrets_present.immich_api_key
-                      ? "Ключ сохранён"
-                      : "Настройте адрес и ключ доступа"}
+                      ? t("Ключ сохранён")
+                      : t("Настройте адрес и ключ доступа")}
                   </small>
                 </span>
               </label>
@@ -225,9 +236,9 @@ export function PhotosPage({
                 </span>
                 <span>
                   <strong>Google Photos</strong>
-                  <small>Интеграция недоступна</small>
+                  <small>{t("Интеграция недоступна")}</small>
                 </span>
-                <span className="badge">Недоступно</span>
+                <span className="badge">{t("Недоступно")}</span>
               </label>
               <label
                 className={`source-option ${p.source === "none" ? "chosen" : ""}`}
@@ -243,8 +254,8 @@ export function PhotosPage({
                   <Icon name="close" size={20} />
                 </span>
                 <span>
-                  <strong>Без источника</strong>
-                  <small>Фотографии не загружаются</small>
+                  <strong>{t("Без источника")}</strong>
+                  <small>{t("Фотографии не загружаются")}</small>
                 </span>
               </label>
             </div>
@@ -254,52 +265,50 @@ export function PhotosPage({
                   type="radio"
                   checked
                   disabled
-                  aria-label="Текущий fixture источник"
+                  aria-label={t("Текущий fixture источник")}
                 />
                 <span className="source-symbol source-icon">
                   <Icon name="image" size={22} />
                 </span>
                 <span>
-                  <strong>Fixture — текущая настройка</strong>
+                  <strong>{t("Fixture — текущая настройка")}</strong>
                   <small>
-                    Доступно только в существующих fixture-развёртываниях.
-                  </small>
+                    {" "}{t("Доступно только в существующих fixture-развёртываниях.")}{" "}</small>
                 </span>
               </div>
             )}
             {p.source === "immich" && (
               <div className="nested-form">
-                <Field label="Общий сервер Immich" help="Адрес и ключ Immich общие для всех дисплеев и редактируются отдельно.">
+                <Field label={t("Общий сервер Immich")} help={t("Адрес и ключ Immich общие для всех дисплеев и редактируются отдельно.")}>
                   <div className="shared-connection-field">
-                    <TextInput value={p.base_url || "Не настроено"} readOnly aria-label="Общий сервер Immich, только чтение" />
-                    <button className="button secondary" type="button" onClick={onOpenConnections}>Общие подключения</button>
+                    <TextInput value={p.base_url || t("Не настроено")} readOnly aria-label={t("Общий сервер Immich, только чтение")} />
+                    <button className="button secondary" type="button" onClick={onOpenConnections}>{t("Общие подключения")}</button>
                   </div>
                 </Field>
                 <Field
                   label="Album ID"
-                  help="Введите UUID альбома из Immich. Выбор из списка пока не поддерживается панелью."
+                  help={t("Введите UUID альбома из Immich. Выбор из списка пока не поддерживается панелью.")}
                 >
                   <TextInput
                     value={p.album_id}
-                    placeholder="UUID альбома"
+                    placeholder={t("UUID альбома")}
                     onChange={(e) => set("album_id", e.target.value)}
                   />
                 </Field>
-                <small>{envelope.secrets_present.immich_api_key ? "Ключ Immich сохранён для общих подключений." : "Ключ Immich ещё не настроен."}</small>
+                <small>{envelope.secrets_present.immich_api_key ? t("Ключ Immich сохранён для общих подключений.") : t("Ключ Immich ещё не настроен.")}</small>
               </div>
             )}
           </div>
           <div className="preview-wrap">
             <div>
-              <strong>Предпросмотр размещения</strong>
+              <strong>{t("Предпросмотр размещения")}</strong>
               <small>
-                Пример размещения на иллюстрации. Фотографии из вашего источника здесь не загружаются.
-              </small>
+                {" "}{t("Пример размещения на иллюстрации. Фотографии из вашего источника здесь не загружаются.")}{" "}</small>
             </div>
             <div
               className={`photo-preview ${p.layout}`}
               role="img"
-              aria-label="Пример размещения вертикального фото"
+              aria-label={t("Пример размещения вертикального фото")}
             >
               <img
                 className="photo-preview-background"
@@ -310,60 +319,60 @@ export function PhotosPage({
               <img
                 className="photo-preview-image"
                 src={previewPhoto}
-                alt="Иллюстрация горного водопада"
+                alt={t("Иллюстрация горного водопада")}
               />
             </div>
           </div>
         </div>
       </section>
       <section className="settings-section">
-        <SectionHeading>Показ</SectionHeading>
-        <Field label="Запуск после бездействия" help={<NumberHelp id={idleHelp} value={p.idle_seconds} {...photoTimingLimits.idle_seconds} />}>
+        <SectionHeading>{t("Показ")}</SectionHeading>
+        <Field label={t("Запуск после бездействия")} help={<NumberHelp id={idleHelp} value={p.idle_seconds} {...photoTimingLimits.idle_seconds} />}>
           <BoundedNumberInput
-            label="Запуск после бездействия"
+            label={t("Запуск после бездействия")}
             helpId={idleHelp}
             timing="idle_seconds"
             value={p.idle_seconds}
             min={photoTimingLimits.idle_seconds.min}
             max={photoTimingLimits.idle_seconds.max}
-            unit="сек"
+            unit={t("сек")}
             onChange={(value) => set("idle_seconds", value)}
           />
         </Field>
-        <Field label="Смена фотографии" help={<NumberHelp id={intervalHelp} value={p.interval_seconds} {...photoTimingLimits.interval_seconds} />}>
+        <Field label={t("Смена фотографии")} help={<NumberHelp id={intervalHelp} value={p.interval_seconds} {...photoTimingLimits.interval_seconds} />}>
           <BoundedNumberInput
-            label="Интервал смены фотографии"
+            label={t("Интервал смены фотографии")}
             helpId={intervalHelp}
             timing="interval_seconds"
             value={p.interval_seconds}
             min={photoTimingLimits.interval_seconds.min}
             max={photoTimingLimits.interval_seconds.max}
-            unit="сек"
+            unit={t("сек")}
             onChange={(value) => set("interval_seconds", value)}
           />
         </Field>
-        <Field label="Порядок">
+        <Field label={t("Порядок")}>
           <Select
             value={p.order}
             onChange={(e) => set("order", e.target.value)}
           >
-            <option value="shuffle">Случайный</option>
-            <option value="sequential">По порядку</option>
+            <option value="shuffle">{t("Случайный")}</option>
+            <option value="sequential">{t("По порядку")}</option>
           </Select>
         </Field>
-        <Field label="Размещение">
+        <Field label={t("Размещение")}>
           <Select
             value={p.layout}
             onChange={(e) => set("layout", e.target.value)}
           >
-            <option value="adaptive">Адаптивное</option>
-            <option value="contain">Целиком</option>
-            <option value="cover">Заполнить экран</option>
+            <option value="adaptive">{t("Адаптивное")}</option>
+            <option value="contain">{t("Целиком")}</option>
+            <option value="cover">{t("Заполнить экран")}</option>
           </Select>
         </Field>
         <Field
-          label="Максимальная обрезка"
-          help="Если обрезка превысит порог, фото показывается целиком на размытой подложке."
+          label={t("Максимальная обрезка")}
+          help={t("Если обрезка превысит порог, фото показывается целиком на размытой подложке.")}
         >
           <span className="range-row">
             <input
@@ -386,13 +395,12 @@ export function PhotosPage({
           disabled={!canStartPhotoFrame || busy}
           onClick={() => runAction("photo_start")}
         >
-          <Icon name="image" size={18} /> Запустить на дисплее
-        </button>
+          <Icon name="image" size={18} /> {" "}{t("Запустить на дисплее")}{" "}</button>
         {!canStartPhotoFrame && (
           <small>
             {!p.enabled || p.source === "none"
-              ? "Включите фоторамку и выберите источник, чтобы запустить её на дисплее."
-              : "Команда недоступна: дисплей не в сети или не сообщил о поддержке этой команды."}
+              ? t("Включите фоторамку и выберите источник, чтобы запустить её на дисплее.")
+              : t("Команда недоступна: дисплей не в сети или не сообщил о поддержке этой команды.")}
           </small>
         )}
       </div>
@@ -439,6 +447,7 @@ function BoundedNumberInput({
 }
 
 function NumberHelp({ id, value, min, max }: { id: string; value: number; min: number; max: number }) {
+  const t = useT();
   const error = numberError(value, min, max, "сек");
-  return <span id={id} className={error ? "error-text" : undefined}>{error ?? `От ${min} до ${max} сек.`}</span>;
+  return <span id={id} className={error ? "error-text" : undefined}>{t(error ?? `От ${min} до ${max} сек.`)}</span>;
 }
