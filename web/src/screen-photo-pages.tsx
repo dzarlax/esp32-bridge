@@ -1,4 +1,6 @@
 import previewPhoto from "./assets/photo-preview.webp";
+import { useId } from "react";
+import { numberError, photoTimingLimits } from "./validation";
 import { type Settings } from "./types";
 import type { PageProps } from "./page-types";
 import {
@@ -15,6 +17,7 @@ import {
 } from "./ui";
 
 export function ScreenPage({ draft, edit, envelope }: PageProps) {
+  const idleHelp = useId();
   const s = draft.screen;
   const set = (key: keyof Settings["screen"], value: string | boolean) =>
     edit({ ...draft, screen: { ...s, [key]: value } });
@@ -64,13 +67,15 @@ export function ScreenPage({ draft, edit, envelope }: PageProps) {
       </section>
       <section className="settings-section">
         <SectionHeading>Режим покоя</SectionHeading>
-        <Field label="При бездействии">
+        <Field label="При бездействии" help={<NumberHelp id={idleHelp} value={draft.photos.idle_seconds} {...photoTimingLimits.idle_seconds} />}>
           <span className="inline-row">
             <BoundedNumberInput
               label="Задержка бездействия"
+              helpId={idleHelp}
+              timing="idle_seconds"
               value={draft.photos.idle_seconds}
-              min={30}
-              max={3600}
+              min={photoTimingLimits.idle_seconds.min}
+              max={photoTimingLimits.idle_seconds.max}
               unit="сек"
               onChange={(value) =>
                 edit({
@@ -158,6 +163,8 @@ export function PhotosPage({
   runAction,
   busy,
 }: PageProps) {
+  const idleHelp = useId();
+  const intervalHelp = useId();
   const p = draft.photos;
   const canStartPhotoFrame =
     canRun(envelope.device, "photo_start") && p.enabled && p.source !== "none";
@@ -311,22 +318,26 @@ export function PhotosPage({
       </section>
       <section className="settings-section">
         <SectionHeading>Показ</SectionHeading>
-        <Field label="Запуск после бездействия">
+        <Field label="Запуск после бездействия" help={<NumberHelp id={idleHelp} value={p.idle_seconds} {...photoTimingLimits.idle_seconds} />}>
           <BoundedNumberInput
             label="Запуск после бездействия"
+            helpId={idleHelp}
+            timing="idle_seconds"
             value={p.idle_seconds}
-            min={30}
-            max={3600}
+            min={photoTimingLimits.idle_seconds.min}
+            max={photoTimingLimits.idle_seconds.max}
             unit="сек"
             onChange={(value) => set("idle_seconds", value)}
           />
         </Field>
-        <Field label="Смена фотографии">
+        <Field label="Смена фотографии" help={<NumberHelp id={intervalHelp} value={p.interval_seconds} {...photoTimingLimits.interval_seconds} />}>
           <BoundedNumberInput
             label="Интервал смены фотографии"
+            helpId={intervalHelp}
+            timing="interval_seconds"
             value={p.interval_seconds}
-            min={15}
-            max={3600}
+            min={photoTimingLimits.interval_seconds.min}
+            max={photoTimingLimits.interval_seconds.max}
             unit="сек"
             onChange={(value) => set("interval_seconds", value)}
           />
@@ -391,6 +402,8 @@ export function PhotosPage({
 
 function BoundedNumberInput({
   label,
+  helpId,
+  timing,
   value,
   min,
   max,
@@ -398,6 +411,8 @@ function BoundedNumberInput({
   onChange,
 }: {
   label: string;
+  helpId: string;
+  timing: keyof typeof photoTimingLimits;
   value: number;
   min: number;
   max: number;
@@ -408,14 +423,22 @@ function BoundedNumberInput({
     <span className="number-input">
       <TextInput
         aria-label={label}
+        aria-describedby={helpId}
+        aria-invalid={Boolean(numberError(value, min, max, unit))}
+        data-photo-timing={timing}
         type="number"
         min={min}
         max={max}
         step={1}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
+        value={Number.isFinite(value) ? value : ""}
+        onChange={(e) => onChange(e.target.valueAsNumber)}
       />
       <span>{unit}</span>
     </span>
   );
+}
+
+function NumberHelp({ id, value, min, max }: { id: string; value: number; min: number; max: number }) {
+  const error = numberError(value, min, max, "сек");
+  return <span id={id} className={error ? "error-text" : undefined}>{error ?? `От ${min} до ${max} сек.`}</span>;
 }

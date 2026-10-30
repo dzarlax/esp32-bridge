@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { formatUptime, type Command } from "./types";
 import type { PageProps } from "./page-types";
+import { errorMessage } from "./error-messages";
 import {
   appliedSettingsStatus,
   canRun,
@@ -233,7 +234,7 @@ function CommandCard({ command }: { command: Command }) {
         />
       </div>
       <small>Создана {new Date(command.created_at).toLocaleString()}</small>
-      {command.error && <p className="error-text">{command.error}</p>}
+      {command.error && <p className="error-text">{errorMessage(command.error, "Дисплей не смог выполнить команду. Повторите попытку после подключения устройства.")}</p>}
     </div>
   );
 }

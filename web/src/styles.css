@@ -1047,6 +1047,9 @@ progress {
 .error-text {
   color: var(--red) !important;
 }
+input[aria-invalid="true"] {
+  border-color: var(--red);
+}
 .sticky-save {
   position: sticky;
   bottom: 12px;
