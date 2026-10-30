@@ -449,6 +449,16 @@ func (s *Store) Update(id string, revision uint64, p Patch) error {
 		return ErrUnavailable
 	}
 	oldHome, newHome := profile.Settings.Services["home"], p.Settings.Services["home"]
+	for _, id := range newHome.Lights {
+		if !slices.Contains(oldHome.Lights, id) && len(id) > 47 {
+			return errors.New("new light entity ID exceeds device limit")
+		}
+	}
+	for _, id := range newHome.Climates {
+		if !slices.Contains(oldHome.Climates, id) && len(id) > 47 {
+			return errors.New("new climate entity ID exceeds device limit")
+		}
+	}
 	if !slices.Equal(oldHome.Favorites, newHome.Favorites) && !slices.Contains(s.devices[id].Capabilities, "home_favorites") {
 		return ErrUnavailable
 	}
@@ -457,7 +467,8 @@ func (s *Store) Update(id string, revision uint64, p Patch) error {
 		if f.Kind == "climate" {
 			allowed = newHome.Climates
 		}
-		if !slices.Contains(allowed, f.EntityID) && !slices.Contains(oldHome.Favorites, f) {
+		wasConfigured := slices.Contains(oldHome.Lights, f.EntityID) || slices.Contains(oldHome.Climates, f.EntityID)
+		if !slices.Contains(allowed, f.EntityID) && (!slices.Contains(oldHome.Favorites, f) || wasConfigured) {
 			return errors.New("favorite not configured")
 		}
 	}

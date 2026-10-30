@@ -1,6 +1,8 @@
 package management
 
 import (
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -257,5 +259,146 @@ func TestCalendarProviderPrefixes(t *testing.T) {
 		if got := calendarProvider(id); got != want {
 			t.Errorf("%s: got %q want %q", id, got, want)
 		}
+	}
+}
+
+func homeCatalogTestStore(t *testing.T, base string) (*settings.Store, string) {
+	t.Helper()
+	d := managementDefaults()
+	home := d.Services["home"]
+	home.BaseURL = base
+	d.Services["home"] = home
+	dir := filepath.Join(t.TempDir(), "state")
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	s, err := settings.New(dir, d, map[string]string{"ha_token": "ha-test-secret"}, "https://panel.example", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := strings.Repeat("b", 32)
+	if _, err = s.Sync(settings.Device{DeviceID: id, BridgeID: s.BridgeID(), BootID: "boot", Firmware: "1"}); err != nil {
+		t.Fatal(err)
+	}
+	return s, id
+}
+
+func TestEntityCatalogFiltersAndCachesHomeAssistantStates(t *testing.T) {
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.URL.Path != "/api/states" || r.Header.Get("Authorization") != "Bearer ha-test-secret" {
+			t.Errorf("unexpected Home Assistant request")
+		}
+		_, _ = w.Write([]byte(`[
+		 {"entity_id":"light.kitchen","state":"on","attributes":{"friendly_name":"Kitchen"}},
+		 {"entity_id":"climate.den","state":"unavailable","attributes":{"friendly_name":"Den"}},
+		 {"entity_id":"sensor.temperature","state":"unknown","attributes":{}},
+		 {"entity_id":"switch.plug","state":"on","attributes":{"friendly_name":"Plug"}}
+		]`))
+	}))
+	defer upstream.Close()
+	s, id := homeCatalogTestStore(t, upstream.URL)
+	api := &API{Store: s}
+	for i := 0; i < 2; i++ {
+		w := catalogRequest(api, id, "entities")
+		if w.Code != 200 || strings.Contains(w.Body.String(), "switch.plug") || strings.Contains(w.Body.String(), "ha-test-secret") || !strings.Contains(w.Body.String(), `"name":"sensor.temperature"`) || !strings.Contains(w.Body.String(), `"available":false`) {
+			t.Fatalf("entity catalog %d %s", w.Code, w.Body.String())
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("cache calls=%d", calls.Load())
+	}
+}
+
+func TestEntityCatalogRejectsMalformedDuplicateAndOversizedCatalogs(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body func() string
+	}{
+		{name: "duplicate", body: func() string {
+			return `[{"entity_id":"light.same","state":"on","attributes":{}},{"entity_id":"light.same","state":"off","attributes":{}}]`
+		}},
+		{name: "malformed id", body: func() string { return `[{"entity_id":"light.Bad ID","state":"on","attributes":{}}]` }},
+		{name: "too many", body: func() string {
+			var b strings.Builder
+			b.WriteByte('[')
+			for i := 0; i < 5001; i++ {
+				if i > 0 {
+					b.WriteByte(',')
+				}
+				fmt.Fprintf(&b, `{"entity_id":"light.item_%d","state":"on","attributes":{}}`, i)
+			}
+			b.WriteByte(']')
+			return b.String()
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, tc.body()) }))
+			defer upstream.Close()
+			s, id := homeCatalogTestStore(t, upstream.URL)
+			w := catalogRequest(&API{Store: s}, id, "entities")
+			want := "catalog_invalid_response"
+			if tc.name == "too many" {
+				want = "catalog_too_large"
+			}
+			if w.Code != 502 || !strings.Contains(w.Body.String(), want) {
+				t.Fatalf("status=%d %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestEntityCatalogIgnoresUnsupportedMetadataAndAllowsLongSupportedState(t *testing.T) {
+	state := strings.Repeat("x", 129)
+	body, err := json.Marshal([]map[string]any{
+		{"entity_id": "switch.plug", "state": map[string]any{"unexpected": true}, "attributes": map[string]any{"friendly_name": 42}},
+		{"entity_id": "sensor.long_state", "state": state, "attributes": map[string]any{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(body) }))
+	defer upstream.Close()
+	s, id := homeCatalogTestStore(t, upstream.URL)
+	w := catalogRequest(&API{Store: s}, id, "entities")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"name":"sensor.long_state"`) || !strings.Contains(w.Body.String(), `"available":true`) || strings.Contains(w.Body.String(), "switch.plug") {
+		t.Fatalf("entity catalog status=%d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestEntityCatalogRejectsStaleInFlightResponseAfterConnectionChange(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			close(started)
+			<-release
+			_, _ = io.WriteString(w, `[]`)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer rotated-secret" {
+			t.Errorf("changed credential was not used")
+		}
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer upstream.Close()
+	s, id := homeCatalogTestStore(t, upstream.URL)
+	api := &API{Store: s}
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- catalogRequest(api, id, "entities") }()
+	<-started
+	view := s.ConnectionsView()
+	newSecret := "rotated-secret"
+	if err := s.UpdateConnections(view.Revision, settings.ConnectionPatch{Connections: view.Connections, Secrets: map[string]*string{"ha_token": &newSecret}}); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	w := <-done
+	if w.Code != 409 || !strings.Contains(w.Body.String(), "catalog_connection_changed") {
+		t.Fatalf("stale response=%d %s", w.Code, w.Body.String())
+	}
+	if got := catalogRequest(api, id, "entities"); got.Code != 502 || !strings.Contains(got.Body.String(), "catalog_forbidden") {
+		t.Fatalf("rotated credential not used: %d %s", got.Code, got.Body.String())
 	}
 }

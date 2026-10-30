@@ -57,6 +57,50 @@ function installFetch(devices: { id: string; name: string }[], settings: (id: st
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.useRealTimers(); window.localStorage.clear(); });
 
 describe("multi-display shell", () => {
+  it("drops a current-version claim when an updates poll fails despite retained online flags", async () => {
+    vi.useFakeTimers();
+    let failUpdates = false;
+    let mismatchSnapshots = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.endsWith("/session")) return json({ authenticated: true, password_enabled: true, cloudflare_enabled: false, csrf_token: "csrf" });
+      if (path.endsWith("/devices")) return json({ devices: [{ id: firstId, name: "Hall", connected: true, last_seen: new Date().toISOString(), applied_revision: 2, desired_revision: 2, firmware: "1.2.3", ip: "192.0.2.10", ssid: "Test" }], max_devices: 8 });
+      if (path.endsWith("/connections")) return json(connections);
+      if (path.endsWith("/updates")) {
+        if (failUpdates) return new Response(JSON.stringify({ error: "catalog_upstream_error" }), { status: 502 });
+        return json({ current_version: "1.2.3", available_version: "1.2.3", update_available: true, device_connected: true, history: [{ id: "attempt", version: "1.2.3", state: "unknown", at: new Date().toISOString() }] });
+      }
+      const match = path.match(/\/devices\/([a-f0-9]{32})\/settings$/);
+      if (match) {
+        const envelope = settingsEnvelope(match[1]!, "Hall");
+        envelope.device.firmware = mismatchSnapshots ? "1.2.2" : "1.2.3";
+        envelope.device.capabilities.push("ota_install");
+        return json(envelope);
+      }
+      return json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    await act(async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); });
+    fireEvent.click(screen.getByRole("button", { name: "Обновления" }));
+    expect(screen.getByText("Доступное обновление уже установлено")).toBeTruthy();
+    expect(screen.getByText("Версия подтверждена текущим ответом дисплея")).toBeTruthy();
+
+    mismatchSnapshots = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(8000); for (let i = 0; i < 12; i++) await Promise.resolve(); });
+    expect(screen.queryByText("Доступное обновление уже установлено")).toBeNull();
+    expect(screen.queryByText("Версия подтверждена текущим ответом дисплея")).toBeNull();
+    expect(screen.getByText("Последние ответы Bridge расходятся по версии")).toBeTruthy();
+    expect(screen.queryByText("Доступна версия")).toBeNull();
+
+    failUpdates = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(8000); for (let i = 0; i < 12; i++) await Promise.resolve(); });
+    expect(screen.queryByText("Доступное обновление уже установлено")).toBeNull();
+    expect(screen.queryByText("Версия подтверждена текущим ответом дисплея")).toBeNull();
+    expect(screen.getByText("Показана последняя известная версия; актуальность не подтверждена")).toBeTruthy();
+    expect(screen.getByText("Доступна версия")).toBeTruthy();
+  });
+
   it("switches the interface language without losing a draft or validation error", async () => {
     installFetch([{ id: firstId, name: "Hall" }], async (id) => settingsEnvelope(id, "Hall"));
     render(<App />);

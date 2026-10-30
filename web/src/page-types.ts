@@ -23,6 +23,7 @@ export type PageProps = {
   networkEditing: boolean;
   setNetworkEditing: (v: boolean) => void;
   updates: UpdateInfo | null;
+  firmwareObservationFresh: boolean;
   command: Command | null;
   pendingCommand: boolean;
   ask: (ask: Ask) => void;

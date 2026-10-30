@@ -29,7 +29,7 @@ export type PhotoSettings = {
   crop_limit_percent: number;
 };
 export type Favorite = { entity_id: string; kind: "light" | "climate"; label?: string };
-export type CatalogItem = { id: string; name: string; asset_count?: number; provider?: string; time_zone?: string; color?: string; read_only?: boolean };
+export type CatalogItem = { id: string; name: string; domain?: "light" | "climate" | "sensor"; available?: boolean; asset_count?: number; provider?: string; time_zone?: string; color?: string; read_only?: boolean };
 export type Catalog = { items: CatalogItem[]; complete: boolean };
 export type ServiceSettings = {
   weather: {
@@ -124,6 +124,7 @@ export type Command = {
   created_at: string;
   expires_at: string;
   error?: string;
+  target_version?: string;
 };
 export type Status = {
   state: "disabled" | "unconfigured" | "ready" | "error" | "unknown";

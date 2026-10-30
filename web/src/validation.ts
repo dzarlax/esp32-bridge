@@ -20,3 +20,24 @@ export function photoTimingError(photos: Settings["photos"]) {
   }
   return null;
 }
+
+export function homeEntityLengthError(home: Settings["services"]["home"], previous: Settings["services"]["home"]) {
+  for (const [field, limit] of [["lights", 47], ["climates", 47], ["sensors", 128]] as const) {
+    const previousIds = previous[field];
+    if (home[field].some((id) => !previousIds.includes(id) && new TextEncoder().encode(id).length > limit)) {
+      return "Home Assistant entity ID exceeds device limit";
+    }
+  }
+  return null;
+}
+
+export function hasUnresolvedHomeFavorite(home: Settings["services"]["home"], previous: Settings["services"]["home"]) {
+  return (home.favorites ?? []).some((favorite) => {
+    const selected = favorite.kind === "light" ? home.lights : home.climates;
+    if (selected.includes(favorite.entity_id)) return false;
+    const wasConfigured = previous.lights.includes(favorite.entity_id) || previous.climates.includes(favorite.entity_id);
+    const unchanged = (previous.favorites ?? []).some((old) => old.kind === favorite.kind &&
+      old.entity_id === favorite.entity_id && (old.label ?? "") === (favorite.label ?? ""));
+    return wasConfigured || !unchanged;
+  });
+}
