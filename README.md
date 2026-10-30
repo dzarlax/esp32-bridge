@@ -362,6 +362,19 @@ The device protocol and safe network/command lifecycle are documented in
 [settings-contract.md](docs/settings-contract.md). Firmware publication and a
 real device update remain separate release actions.
 
+### Persistent photo information layer (HomeDash v1.0.29)
+
+Bridge advertises `scene_context_version: 3` alongside
+`overlay_context_version: 2` for released HomeDash v1.0.28. V3 clients request
+`/api/photo-frame/v3/context` and `/api/photo-frame/v3/overlays/{render_id}`
+with the existing API key and device ID. The context and cached cards are
+independent of photo identity. Weather and event cards contain only text and
+art in straight-alpha BGRA byte order (`argb8888-le-straight`, four bytes per
+pixel); the device draws the panel backgrounds and the clock. The clock and
+event share the lower edge at y=576. IDs are scoped to device, style, geometry
+and content; refresh cadence and expiry remain unchanged. This behavior requires HomeDash v1.0.29 or newer; physical-device memory and
+long-running Wi-Fi acceptance remain separate from server and simulator checks.
+
 ## License
 
 MIT

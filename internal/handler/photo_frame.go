@@ -33,6 +33,7 @@ func (h *Handler) PhotoManifest(w http.ResponseWriter, r *http.Request) {
 	m := h.photoFrame.Manifest()
 	if h.overlay != nil {
 		m.OverlayContextVersion = 2
+		m.SceneContextVersion = 3
 	}
 	_ = json.NewEncoder(w).Encode(m)
 }

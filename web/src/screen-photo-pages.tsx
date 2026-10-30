@@ -321,7 +321,7 @@ export function PhotosPage({
                 src={previewPhoto}
                 alt={t("Иллюстрация горного водопада")}
               />
-              <div className={`photo-preview-overlays${envelope.device.capabilities.includes("photo_overlay_adaptive") ? " adaptive" : ""}`} aria-hidden="true">
+              <div className={`photo-preview-overlays${envelope.device.capabilities.includes("photo_scene_unified") ? " unified" : envelope.device.capabilities.includes("photo_overlay_adaptive") ? " adaptive" : ""}`} aria-hidden="true">
                 <span className="preview-demo">{t("Демо")}</span>
                 {(p.show_clock ?? true) && (
                   <div className="preview-clock">
@@ -380,6 +380,10 @@ export function PhotosPage({
           ) : !envelope.device.capabilities.includes("photo_overlay_adaptive") ? (
             <small className="field-note">
               {t("Адаптивное оформление появится после обновления прошивки дисплея.")}
+            </small>
+          ) : !envelope.device.capabilities.includes("photo_scene_unified") ? (
+            <small className="field-note">
+              {t("Постоянный информационный слой появится после обновления прошивки дисплея.")}
             </small>
           ) : null}
         </Field>
