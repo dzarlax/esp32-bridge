@@ -165,13 +165,15 @@ Rendering runs in a separate background worker, not in request handlers.
 
 Managed displays can independently enable `show_clock`, `show_weather`, and
 `show_event` in photo settings; omitted values default to true. With all three
-false, photos have no overlays or clock shading. The authenticated, device-scoped
+false, photos have no overlays. Photo pixels do not depend on clock visibility. The authenticated, device-scoped
 `GET /api/photo-frame/v1/context` returns clock preferences and up to two
 weather and next-event blocks. `GET /api/photo-frame/v1/overlays/{render_id}`
 returns the corresponding RGB565 little-endian pixels. Both routes require
 `X-API-Key` and `X-Device-ID`, use `no-store`, and leave the existing manifest
 and frame endpoints available. Weather and event blocks expire after 30 and 5
-minutes respectively, or earlier at an event transition. The Go Regular font
+minutes respectively, or earlier at an event transition. Partial calendar results
+use only explicitly ready, non-stale sources and label the resulting event card
+as coming from available calendars. The Go Regular font
 used for card text is distributed with `golang.org/x/image` under the Go BSD
 license.
 

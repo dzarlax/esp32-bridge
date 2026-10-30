@@ -122,13 +122,42 @@ func TestOverlayVisibilityPreservesPhotoWorker(t *testing.T) {
 	v.Photos.ShowClock = &off
 	update()
 	changed := m.current.Load().photos
-	if changed == original {
-		t.Fatal("clock shading change did not rerender photos")
+	if changed != original {
+		t.Fatal("local clock visibility reset photo service")
 	}
 	v.Photos.ShowWeather = &off
 	v.Photos.ShowEvent = &off
 	update()
 	if m.current.Load().photos != changed {
 		t.Fatal("weather or event change reset unshaded photo service")
+	}
+}
+
+func TestPhotoClockDoesNotCreateBottomBand(t *testing.T) {
+	m, err := New(testConfig(), &http.Client{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.current.Load().cancel()
+	photos := m.current.Load().photos
+	for deadline := time.Now().Add(5 * time.Second); photos.Manifest().State != "ready" && time.Now().Before(deadline); {
+		time.Sleep(10 * time.Millisecond)
+	}
+	frames := photos.Manifest().Frames
+	if len(frames) == 0 {
+		t.Fatal("fixture not ready")
+	}
+	data, release, ok := photos.Borrow(frames[0].ID)
+	if !ok {
+		t.Fatal("fixture unavailable")
+	}
+	defer release()
+	// The uniform fixture must remain uniform vertically through the clock region.
+	baseline := (200*1024 + 512) * 2
+	for _, y := range []int{399, 400, 450, 550, 599} {
+		offset := (y*1024 + 512) * 2
+		if data[offset] != data[baseline] || data[offset+1] != data[baseline+1] {
+			t.Fatalf("clock shade changes source pixels at row %d", y)
+		}
 	}
 }

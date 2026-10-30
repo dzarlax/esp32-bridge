@@ -237,9 +237,7 @@ func (m *Manager) build(c config.Config, v settings.Values) (*runtime, error) {
 	photoOptions := v.Photos
 	photoOptions.ShowWeather = nil
 	photoOptions.ShowEvent = nil
-	if photoOptions.ShowClock != nil && *photoOptions.ShowClock {
-		photoOptions.ShowClock = nil
-	}
+	photoOptions.ShowClock = nil
 	hashData, _ := json.Marshal(struct {
 		Photo settings.Photos
 		Key   string
@@ -262,7 +260,7 @@ func (m *Manager) build(c config.Config, v settings.Values) (*runtime, error) {
 			}
 		}
 		r.photos = photoframe.New(c.PhotoEnabled, src, c.PhotoIdle, c.PhotoInterval, c.PhotoStale, c.PhotoCache)
-		r.photos.Configure(photoframe.RenderOptions{Layout: v.Photos.Layout, CropLimitPercent: v.Photos.CropLimitPercent, ClockShade: v.Photos.ShowClock == nil || *v.Photos.ShowClock}, v.Photos.Order)
+		r.photos.Configure(photoframe.RenderOptions{Layout: v.Photos.Layout, CropLimitPercent: v.Photos.CropLimitPercent}, v.Photos.Order)
 		ctx, cancel := context.WithCancel(context.Background())
 		r.cancel = cancel
 		r.start = func() { go r.photos.Run(ctx) }

@@ -247,6 +247,7 @@ func (h *Handler) PhotoOverlay(w http.ResponseWriter, r *http.Request) {
 type photoEvent struct {
 	title, calendar, id string
 	start, end          time.Time
+	partial             bool
 }
 
 func (h *Handler) nextPhotoEvent(r *http.Request, now time.Time) (*photoEvent, error) {
@@ -268,7 +269,7 @@ func (h *Handler) nextPhotoEvent(r *http.Request, now time.Time) (*photoEvent, e
 			a, e1 := time.Parse(time.RFC3339, v.Start.DateTime)
 			b, e2 := time.Parse(time.RFC3339, v.End.DateTime)
 			if e1 == nil && e2 == nil {
-				events = append(events, photoEvent{model.SanitizeForDisplay(strings.TrimSpace(v.Title)), v.CalendarID, v.ID, a, b})
+				events = append(events, photoEvent{title: model.SanitizeForDisplay(strings.TrimSpace(v.Title)), calendar: v.CalendarID, id: v.ID, start: a, end: b, partial: v.partial})
 			}
 		}
 	} else {
@@ -295,7 +296,7 @@ func (h *Handler) nextPhotoEvent(r *http.Request, now time.Time) (*photoEvent, e
 				a, e1 := parsePhotoTime(v.Start.DateTime, loc)
 				b, e2 := parsePhotoTime(v.End.DateTime, loc)
 				if e1 == nil && e2 == nil {
-					events = append(events, photoEvent{model.SanitizeForDisplay(strings.TrimSpace(v.Summary)), cal, v.ID, a, b})
+					events = append(events, photoEvent{title: model.SanitizeForDisplay(strings.TrimSpace(v.Summary)), calendar: cal, id: v.ID, start: a, end: b})
 				}
 			}
 		}
@@ -539,5 +540,12 @@ func renderEvent(e photoEvent, s settings.Screen, now time.Time) []byte {
 	}
 	textLine(img, 20, 29, label, 16, muted, 440)
 	textLine(img, 20, 70, e.title, 27, white, 440)
+	if e.partial {
+		caption := map[string]string{"ru": "По доступным календарям", "en": "From available calendars", "sr-Latn": "Iz dostupnih kalendara"}[s.Locale]
+		if caption == "" {
+			caption = "From available calendars"
+		}
+		textLine(img, 20, 96, caption, 14, muted, 440)
+	}
 	return pixels(img)
 }
