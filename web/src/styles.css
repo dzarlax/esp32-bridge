@@ -782,6 +782,36 @@ p {
   backdrop-filter: blur(8px);
   box-shadow: 0 2px 8px rgb(0 0 0 / 12%);
 }
+.photo-preview {
+  container-type: inline-size;
+}
+.photo-preview-overlays.unified :is(.preview-clock, .preview-weather, .preview-event) {
+  width: max-content;
+  min-width: 0;
+  padding: 1.4cqw 1.6cqw;
+  background: rgb(0 0 0 / 27%);
+  border: 1px solid rgb(255 255 255 / 32%);
+  border-radius: 1.6cqw;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 60%);
+}
+.photo-preview-overlays.unified :is(.preview-clock, .preview-event) {
+  bottom: 4%;
+}
+.photo-preview-overlays.unified .preview-clock {
+  left: 2.34375%;
+  max-width: 46.875%;
+}
+.photo-preview-overlays.unified .preview-clock strong {
+  font-size: 7.8125cqw;
+  font-variant-numeric: tabular-nums;
+}
+.photo-preview-overlays.unified .preview-clock span {
+  font-size: 1.5625cqw;
+}
+.photo-preview-overlays.unified .preview-event {
+  right: 3.7109375%;
+  max-width: 44.53125%;
+}
 .photo-overlay-toggles {
   display: flex;
   flex-wrap: wrap;

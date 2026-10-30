@@ -257,6 +257,12 @@ describe("settings screen field interactions", () => {
     props.envelope.device.capabilities.push("photo_overlay_adaptive");
     view.rerender(<PhotosPage {...props} />);
     expect(screen.queryByText("Адаптивное оформление появится после обновления прошивки дисплея.")).toBeNull();
+    expect(screen.getByText("Постоянный информационный слой появится после обновления прошивки дисплея.")).toBeTruthy();
+    props.envelope.device.capabilities.push("photo_scene_unified");
+    view.rerender(<PhotosPage {...props} />);
+    expect(screen.queryByText("Постоянный информационный слой появится после обновления прошивки дисплея.")).toBeNull();
+    expect(view.container.querySelector(".photo-preview-overlays.unified")).not.toBeNull();
+    expect(view.container.querySelector(".photo-preview-overlays.adaptive")).toBeNull();
   });
 
   it("defaults absent photo overlay settings to enabled and edits each toggle independently", () => {

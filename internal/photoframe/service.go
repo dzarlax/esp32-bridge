@@ -30,6 +30,7 @@ type Frame struct {
 }
 type Manifest struct {
 	OverlayContextVersion int     `json:"overlay_context_version,omitempty"`
+	SceneContextVersion   int     `json:"scene_context_version,omitempty"`
 	Version               int     `json:"version"`
 	State                 string  `json:"state"`
 	Generation            string  `json:"generation"`
