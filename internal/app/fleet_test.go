@@ -21,6 +21,59 @@ import (
 const deviceA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 const deviceB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
+func TestUnregisteredDeviceCanRecoverThroughAuthenticatedOTA(t *testing.T) {
+	cfg := testConfig()
+	f, err := NewFleet(cfg, &http.Client{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.current.Load().nodes[""].current.Load().cancel()
+	f.EnableManaged()
+	request := func(method, path, id, key string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, path, nil)
+		r.Header.Set("X-Device-ID", id)
+		r.Header.Set("X-API-Key", key)
+		w := httptest.NewRecorder()
+		f.ServeHTTP(w, r)
+		return w
+	}
+	for _, path := range []string{"/api/ota/check?v=1.0.22", "/api/ota/firmware"} {
+		t.Run(path, func(t *testing.T) {
+			legacy := request("GET", path, "", cfg.APIKey)
+			got := request("GET", path, deviceA, cfg.APIKey)
+			if got.Code != legacy.Code || got.Body.String() != legacy.Body.String() {
+				t.Fatalf("bootstrap OTA = %d %s; legacy = %d %s", got.Code, got.Body, legacy.Code, legacy.Body)
+			}
+			for _, key := range []string{"", "wrong-key"} {
+				if got := request("GET", path, deviceA, key); got.Code != http.StatusUnauthorized {
+					t.Fatalf("unauthenticated OTA = %d", got.Code)
+				}
+			}
+			queryPath := path + "?key=" + cfg.APIKey
+			if strings.Contains(path, "?") {
+				queryPath = path + "&key=" + cfg.APIKey
+			}
+			if got := request("GET", queryPath, deviceA, ""); got.Code != http.StatusUnauthorized {
+				t.Fatalf("query-string key accepted for bootstrap OTA: %d", got.Code)
+			}
+			if got := request("GET", path, "invalid", cfg.APIKey); got.Code != http.StatusBadRequest {
+				t.Fatalf("invalid ID = %d", got.Code)
+			}
+			if got := request("POST", path, deviceA, cfg.APIKey); got.Code != http.StatusMethodNotAllowed {
+				t.Fatalf("POST OTA = %d", got.Code)
+			}
+		})
+	}
+	for _, path := range []string{"/api/dashboard", "/api/calendar", "/api/photo-frame/v1/manifest", "/api/ota/other", "/api/ota/firmware/extra"} {
+		if got := request("GET", path, deviceA, cfg.APIKey); got.Code != http.StatusNotFound {
+			t.Fatalf("unregistered %s = %d", path, got.Code)
+		}
+	}
+	if len(f.current.Load().nodes) != 1 {
+		t.Fatal("GET created a device runtime")
+	}
+}
+
 func TestFleetIsolationAndAtomicFailure(t *testing.T) {
 	cfg := testConfig()
 	f, err := NewFleet(cfg, &http.Client{})
