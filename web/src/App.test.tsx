@@ -132,6 +132,24 @@ describe("multi-display shell", () => {
     expect(JSON.parse(String(init?.body)).settings.screen.locale).toBe("en");
   });
 
+  it("persists independently edited photo overlay settings in the settings payload", async () => {
+    const fetchMock = installFetch([{ id: firstId, name: "Hall" }], async (id) => settingsEnvelope(id, "Hall"));
+    render(<App />);
+    await screen.findByLabelText("Подпись города");
+    fireEvent.click(screen.getByRole("button", { name: "Фоторамка" }));
+
+    fireEvent.click(screen.getByRole("switch", { name: "Часы и дата" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Ближайшее событие" }));
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения" }));
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true));
+    const [, init] = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH")!;
+    const saved = JSON.parse(String(init?.body)).settings.photos;
+    expect(saved.show_clock).toBe(false);
+    expect(saved.show_event).toBe(false);
+    expect(saved.show_weather).toBeUndefined();
+  });
+
   it("explains the separate minimum for photo changes", async () => {
     const fetchMock = installFetch([{ id: firstId, name: "Hall" }], async (id) => settingsEnvelope(id, "Hall"));
     render(<App />);

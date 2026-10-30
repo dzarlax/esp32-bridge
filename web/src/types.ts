@@ -13,6 +13,9 @@ export type ScreenSettings = {
 };
 export type PhotoSettings = {
   enabled: boolean;
+  show_clock?: boolean;
+  show_weather?: boolean;
+  show_event?: boolean;
   source: "none" | "immich" | "fixture";
   base_url: string;
   album_id: string;

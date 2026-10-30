@@ -21,13 +21,13 @@ func NewWeather(lat, lon, tz string, client *http.Client, ttl time.Duration) *We
 	return &WeatherFetcher{lat: lat, lon: lon, tz: tz, client: client, ttl: ttl}
 }
 
-func (f *WeatherFetcher) Name() string      { return "weather" }
+func (f *WeatherFetcher) Name() string       { return "weather" }
 func (f *WeatherFetcher) TTL() time.Duration { return f.ttl }
 
 func (f *WeatherFetcher) Fetch(ctx context.Context) (json.RawMessage, error) {
 	u := fmt.Sprintf(
 		"https://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s"+
-			"&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code"+
+			"&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code,is_day"+
 			"&daily=weather_code,temperature_2m_max,temperature_2m_min"+
 			"&timezone=%s&forecast_days=5",
 		f.lat, f.lon, url.QueryEscape(f.tz),
@@ -52,6 +52,7 @@ func (f *WeatherFetcher) Fetch(ctx context.Context) (json.RawMessage, error) {
 			Humidity    float64 `json:"relative_humidity_2m"`
 			WindSpeed   float64 `json:"wind_speed_10m"`
 			WeatherCode int     `json:"weather_code"`
+			IsDay       int     `json:"is_day"`
 		} `json:"current"`
 		Daily struct {
 			WeatherCode []int     `json:"weather_code"`
@@ -68,6 +69,7 @@ func (f *WeatherFetcher) Fetch(ctx context.Context) (json.RawMessage, error) {
 		Humidity:    apiResp.Current.Humidity,
 		WindSpeed:   apiResp.Current.WindSpeed,
 		WeatherCode: apiResp.Current.WeatherCode,
+		IsDay:       apiResp.Current.IsDay == 1,
 	}
 	n := len(apiResp.Daily.WeatherCode)
 	if n > len(apiResp.Daily.TempMax) {

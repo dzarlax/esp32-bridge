@@ -21,6 +21,9 @@ type Screen struct {
 	AutoInstall     bool   `json:"auto_install"`
 }
 type Photos struct {
+	ShowClock        *bool  `json:"show_clock,omitempty"`
+	ShowWeather      *bool  `json:"show_weather,omitempty"`
+	ShowEvent        *bool  `json:"show_event,omitempty"`
 	Enabled          bool   `json:"enabled"`
 	Source           string `json:"source"`
 	BaseURL          string `json:"base_url"`

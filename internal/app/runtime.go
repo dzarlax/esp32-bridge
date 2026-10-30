@@ -234,10 +234,16 @@ func (m *Manager) build(c config.Config, v settings.Values) (*runtime, error) {
 	if m.managed {
 		c.PhotoCache = 16
 	}
+	photoOptions := v.Photos
+	photoOptions.ShowWeather = nil
+	photoOptions.ShowEvent = nil
+	if photoOptions.ShowClock != nil && *photoOptions.ShowClock {
+		photoOptions.ShowClock = nil
+	}
 	hashData, _ := json.Marshal(struct {
 		Photo settings.Photos
 		Key   string
-	}{v.Photos, key})
+	}{photoOptions, key})
 	photoHash := sha256.Sum256(hashData)
 	r := &runtime{handler: h, orch: orch, mux: http.NewServeMux(), photoHash: photoHash, values: v, start: func() {}}
 	if old := m.current.Load(); old != nil && old.photoHash == photoHash {
@@ -256,12 +262,18 @@ func (m *Manager) build(c config.Config, v settings.Values) (*runtime, error) {
 			}
 		}
 		r.photos = photoframe.New(c.PhotoEnabled, src, c.PhotoIdle, c.PhotoInterval, c.PhotoStale, c.PhotoCache)
-		r.photos.Configure(photoframe.RenderOptions{Layout: v.Photos.Layout, CropLimitPercent: v.Photos.CropLimitPercent}, v.Photos.Order)
+		r.photos.Configure(photoframe.RenderOptions{Layout: v.Photos.Layout, CropLimitPercent: v.Photos.CropLimitPercent, ClockShade: v.Photos.ShowClock == nil || *v.Photos.ShowClock}, v.Photos.Order)
 		ctx, cancel := context.WithCancel(context.Background())
 		r.cancel = cancel
 		r.start = func() { go r.photos.Run(ctx) }
 	}
 	h.SetPhotoFrame(r.photos)
+	h.SetPhotoOverlaySettings(v.Screen, v.Photos, v.Services["weather"].Enabled, v.Services["calendar"].Enabled || (!m.managed && v.Services["home"].Enabled))
+	if old := m.current.Load(); old != nil {
+		h.SharePhotoOverlayCache(old.handler)
+	}
+	r.mux.HandleFunc("/api/photo-frame/v1/context", h.PhotoContext)
+	r.mux.HandleFunc("/api/photo-frame/v1/overlays/", h.PhotoOverlay)
 	r.mux.HandleFunc("/api/photo-frame/v1/manifest", h.PhotoManifest)
 	r.mux.HandleFunc("/api/photo-frame/v1/frames/", h.PhotoFrame)
 	r.mux.HandleFunc("/api/dashboard", h.Dashboard)

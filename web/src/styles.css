@@ -695,6 +695,88 @@ p {
   height: 100%;
   object-fit: cover;
 }
+.photo-preview-overlays {
+  position: absolute;
+  inset: 0;
+  color: #fff;
+  font-size: clamp(7px, 1.1vw, 12px);
+  text-shadow: 0 1px 4px #000;
+  pointer-events: none;
+}
+.preview-demo {
+  position: absolute;
+  top: 6%;
+  left: 4%;
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: rgb(18 32 39 / 78%);
+  font-size: .72em;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.preview-clock {
+  position: absolute;
+  bottom: 6%;
+  left: 4%;
+  display: grid;
+  gap: 2px;
+}
+.preview-clock strong {
+  font-size: clamp(20px, 4vw, 42px);
+  line-height: 1;
+  font-weight: 500;
+}
+.preview-weather {
+  position: absolute;
+  top: 6%;
+  right: 5%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 78px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: rgb(18 32 39 / 78%);
+}
+.preview-weather svg {
+  width: clamp(18px, 2.4vw, 27px);
+  height: auto;
+  fill: #f4c65d;
+  stroke: #f4c65d;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+.preview-weather span,
+.preview-weather small {
+  display: block;
+}
+.preview-weather strong {
+  font-size: 1.3em;
+}
+.preview-weather small {
+  margin-top: 1px;
+}
+.preview-event {
+  position: absolute;
+  right: 5%;
+  bottom: 6%;
+  display: grid;
+  gap: 2px;
+  max-width: 48%;
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: rgb(18 32 39 / 82%);
+}
+.preview-event span {
+  font-size: .72em;
+  letter-spacing: .05em;
+}
+.photo-overlay-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 24px;
+}
 .range-row {
   display: flex;
   align-items: center;

@@ -92,3 +92,40 @@ func TestFetchContextCancelsCoalescedWait(t *testing.T) {
 	close(release)
 	<-done
 }
+
+func TestFetchRecentCoalescesAndKeepsOriginalTime(t *testing.T) {
+	c := New()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var calls atomic.Int32
+	fetch := func() (json.RawMessage, error) {
+		if calls.Add(1) == 1 {
+			close(started)
+		}
+		<-release
+		return json.RawMessage(`{"value":1}`), nil
+	}
+	type result struct {
+		at  time.Time
+		err error
+	}
+	results := make(chan result, 2)
+	go func() {
+		_, at, err := c.FetchRecentContext(context.Background(), "weather", time.Second, 5*time.Minute, fetch)
+		results <- result{at, err}
+	}()
+	<-started
+	go func() {
+		_, at, err := c.FetchRecentContext(context.Background(), "weather", time.Second, 5*time.Minute, fetch)
+		results <- result{at, err}
+	}()
+	close(release)
+	a, b := <-results, <-results
+	if a.err != nil || b.err != nil || calls.Load() != 1 || !a.at.Equal(b.at) {
+		t.Fatalf("calls=%d results=%+v %+v", calls.Load(), a, b)
+	}
+	_, at, err := c.FetchRecentContext(context.Background(), "weather", time.Second, 5*time.Minute, fetch)
+	if err != nil || !at.Equal(a.at) || calls.Load() != 1 {
+		t.Fatalf("cached time changed: %v %v", at, err)
+	}
+}

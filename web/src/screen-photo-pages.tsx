@@ -321,12 +321,64 @@ export function PhotosPage({
                 src={previewPhoto}
                 alt={t("Иллюстрация горного водопада")}
               />
+              <div className="photo-preview-overlays" aria-hidden="true">
+                <span className="preview-demo">{t("Демо")}</span>
+                {(p.show_clock ?? true) && (
+                  <div className="preview-clock">
+                    <strong>18:42</strong>
+                    <span>{t("Пятница, 30 октября")}</span>
+                  </div>
+                )}
+                {(p.show_weather ?? true) && (
+                  <div className="preview-weather">
+                    <svg viewBox="0 0 32 32" focusable="false">
+                      <circle cx="13" cy="13" r="5" />
+                      <path d="M13 2v3m0 16v3M2 13h3m16 0h3M5.2 5.2l2.1 2.1m11.4 11.4 2.1 2.1m0-15.6-2.1 2.1M7.3 18.7l-2.1 2.1" />
+                      <path d="M13 18h10a4 4 0 0 1 0 8h-9a4 4 0 0 1-1-8Z" />
+                    </svg>
+                    <span><strong>18°</strong><small>{t("Ясно")}</small></span>
+                  </div>
+                )}
+                {(p.show_event ?? true) && (
+                  <div className="preview-event">
+                    <span>{t("СЛЕДУЮЩЕЕ СОБЫТИЕ")}</span>
+                    <strong>{t("Встреча · 19:30")}</strong>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
       </section>
       <section className="settings-section">
         <SectionHeading>{t("Показ")}</SectionHeading>
+        <Field
+          label={t("Информация поверх фото")}
+          help={t("Погода и события используют настроенные на дисплее источники. Даты и подписи форматируются на языке дисплея.")}
+        >
+          <div className="photo-overlay-toggles">
+            <Toggle
+              label={t("Часы и дата")}
+              checked={p.show_clock ?? true}
+              onChange={(value) => set("show_clock", value)}
+            />
+            <Toggle
+              label={t("Погода")}
+              checked={p.show_weather ?? true}
+              onChange={(value) => set("show_weather", value)}
+            />
+            <Toggle
+              label={t("Ближайшее событие")}
+              checked={p.show_event ?? true}
+              onChange={(value) => set("show_event", value)}
+            />
+          </div>
+          {!envelope.device.capabilities.includes("photo_overlay") && (
+            <small className="field-note">
+              {t("Информационный слой появится после обновления прошивки дисплея.")}
+            </small>
+          )}
+        </Field>
         <Field label={t("Запуск после бездействия")} help={<NumberHelp id={idleHelp} value={p.idle_seconds} {...photoTimingLimits.idle_seconds} />}>
           <BoundedNumberInput
             label={t("Запуск после бездействия")}

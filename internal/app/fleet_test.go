@@ -326,3 +326,99 @@ func TestHAStateUsesDeviceSelection(t *testing.T) {
 		}
 	}
 }
+
+func TestFleetPhotoOverlayRoutesAreDeviceScoped(t *testing.T) {
+	cfg := testConfig()
+	cfg.WeatherLat = "44.8"
+	cfg.WeatherLon = "20.4"
+	cfg.WeatherTZ = "Europe/Belgrade"
+	client := &http.Client{Transport: overlayTestTransport(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"current":{"temperature_2m":18,"weather_code":0,"is_day":1}}`)), Header: http.Header{}}, nil
+	})}
+	f, err := NewFleet(cfg, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		for _, m := range f.current.Load().nodes {
+			m.current.Load().cancel()
+		}
+	}()
+	v := settings.Defaults(cfg, "")
+	profiles := map[string]settings.Values{"": v, deviceA: v, deviceB: v}
+	commit, _, err := f.Prepare(profiles, DefaultSecrets(cfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit()
+	f.EnableManaged()
+	request := func(path, id string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", path, nil)
+		r.Header.Set("X-API-Key", cfg.APIKey)
+		r.Header.Set("X-Device-ID", id)
+		w := httptest.NewRecorder()
+		f.ServeHTTP(w, r)
+		return w
+	}
+	var a, b struct {
+		Blocks []struct {
+			RenderID string `json:"render_id"`
+		} `json:"blocks"`
+	}
+	wa := request("/api/photo-frame/v1/context", deviceA)
+	wb := request("/api/photo-frame/v1/context", deviceB)
+	if err := json.Unmarshal(wa.Body.Bytes(), &a); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(wb.Body.Bytes(), &b); err != nil {
+		t.Fatal(err)
+	}
+	if len(a.Blocks) != 1 || len(b.Blocks) != 1 || a.Blocks[0].RenderID == b.Blocks[0].RenderID {
+		t.Fatalf("contexts invalid %s %s", wa.Body, wb.Body)
+	}
+	path := "/api/photo-frame/v1/overlays/" + a.Blocks[0].RenderID
+	if request(path, deviceA).Code != 200 || request(path, deviceB).Code != 404 {
+		t.Fatal("overlay crossed device boundary")
+	}
+}
+
+type overlayTestTransport func(*http.Request) (*http.Response, error)
+
+func (f overlayTestTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestManagedPhotoContextDoesNotReadDisabledCalendar(t *testing.T) {
+	cfg := testConfig()
+	cfg.HABaseURL = "https://ha.example"
+	cfg.HAToken = "token"
+	var calls atomic.Int32
+	client := &http.Client{Transport: overlayTestTransport(func(r *http.Request) (*http.Response, error) {
+		calls.Add(1)
+		return nil, fmt.Errorf("unexpected source request")
+	})}
+	f, err := NewFleet(cfg, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		for _, m := range f.current.Load().nodes {
+			m.current.Load().cancel()
+		}
+	}()
+	v := settings.Defaults(cfg, "")
+	v.Services["home"] = settings.Service{Enabled: true, BaseURL: cfg.HABaseURL}
+	v.Services["calendar"] = settings.Service{Enabled: false, Timezone: "Europe/Belgrade"}
+	commit, _, err := f.Prepare(map[string]settings.Values{"": v, deviceA: v}, DefaultSecrets(cfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit()
+	f.EnableManaged()
+	r := httptest.NewRequest("GET", "/api/photo-frame/v1/context", nil)
+	r.Header.Set("X-API-Key", cfg.APIKey)
+	r.Header.Set("X-Device-ID", deviceA)
+	w := httptest.NewRecorder()
+	f.ServeHTTP(w, r)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"blocks":[]`) || calls.Load() != 0 {
+		t.Fatalf("context=%d %s calls=%d", w.Code, w.Body, calls.Load())
+	}
+}
