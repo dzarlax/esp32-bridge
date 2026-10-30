@@ -266,6 +266,7 @@ func (m *Manager) build(c config.Config, v settings.Values) (*runtime, error) {
 	r.mux.HandleFunc("/api/photo-frame/v1/frames/", h.PhotoFrame)
 	r.mux.HandleFunc("/api/dashboard", h.Dashboard)
 	r.mux.HandleFunc("/api/ha/action", h.HAAction)
+	r.mux.HandleFunc("/api/ha/state", h.HAState)
 	r.mux.HandleFunc("/api/calendar", h.Calendar)
 	r.mux.HandleFunc("/api/ota/check", h.OTACheck)
 	r.mux.HandleFunc("/api/ota/firmware", h.OTAFirmware)

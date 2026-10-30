@@ -252,7 +252,7 @@ export function DevicePage({
   const t = useT();
   const { locale } = useLocale();
   const d = envelope.device;
-  const settingsStatus = appliedSettingsStatus(d, envelope.revision, t);
+  const settingsStatus = appliedSettingsStatus(envelope, t);
   const facts: Array<[string, ReactNode]> = [
     ["Прошивка", d.firmware || t("Не сообщается")],
     ["Bridge", d.connected ? t("На связи") : t("Не в сети")],

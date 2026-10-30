@@ -47,6 +47,10 @@ func TestHAActionForConfiguredClimate(t *testing.T) {
 	var gotPath string
 	var gotBody map[string]interface{}
 	ha := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			w.Write([]byte(`{"entity_id":"climate.gostinaia","state":"dry"}`))
+			return
+		}
 		gotPath = r.URL.Path
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 			t.Fatal(err)

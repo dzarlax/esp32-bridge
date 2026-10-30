@@ -1,5 +1,6 @@
 import React from "react";
-import type { Device, Envelope, Status } from "./types";
+import type { Envelope, Status } from "./types";
+import { currentApplicationState } from "./settings-apply-status";
 import { useT } from "./i18n";
 
 export type Ask = {
@@ -27,19 +28,18 @@ const statusLabels: Record<Status["state"], string> = {
 export const canRun = (device: Envelope["device"], action: string) =>
   device.connected && device.capabilities.includes(action);
 
-export function appliedSettingsStatus(device: Device, desiredRevision: number, t: (message: string) => string) {
-  if (!device.last_seen) {
-    return device.connected
-      ? { state: "muted" as const, label: t("Подтверждение не получено") }
-      : { state: "warn" as const, label: t("Ожидает подключения") };
+export function appliedSettingsStatus(envelope: Envelope, t: (message: string) => string) {
+  const state = currentApplicationState(envelope);
+  if (state === "applied") {
+    return envelope.device.connected
+      ? { state: "good" as const, label: t("Настройки подтверждены устройством") }
+      : { state: "good" as const, label: t("Настройки применены при последнем подключении") };
   }
-  if (device.applied_revision === desiredRevision) {
-    return {
-      state: "good" as const,
-      label: t("Настройки подтверждены устройством"),
-    };
-  }
-  return device.connected
+  if (!envelope.device.last_seen && envelope.device.connected)
+    return { state: "muted" as const, label: t("Подтверждение не получено") };
+  if (!envelope.device.last_seen)
+    return { state: "warn" as const, label: t("Ожидает подключения") };
+  return state === "waiting"
     ? { state: "warn" as const, label: t("Ожидают применения") }
     : { state: "muted" as const, label: t("Ожидают подключения") };
 }

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 
@@ -54,7 +54,7 @@ function installFetch(devices: { id: string; name: string }[], settings: (id: st
   return fetchMock;
 }
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.localStorage.clear(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.useRealTimers(); window.localStorage.clear(); });
 
 describe("multi-display shell", () => {
   it("switches the interface language without losing a draft or validation error", async () => {
@@ -206,5 +206,293 @@ describe("multi-display shell", () => {
     expect(await screen.findByDisplayValue("Office")).toBeTruthy();
     releaseFirst(settingsEnvelope(firstId, "Kitchen"));
     await waitFor(() => expect((screen.getByLabelText("Имя дисплея") as HTMLInputElement).value).toBe("Office"));
+  });
+
+  it("keeps a lost PATCH uncertain after an unchanged read, then reconciles a delayed commit without resaving", async () => {
+    let serverEnvelope = settingsEnvelope(firstId, "Hall");
+    let patchBody: any;
+    let losePatch!: () => void;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path.endsWith("/session")) return json({ authenticated: true, password_enabled: true, cloudflare_enabled: false, csrf_token: "csrf" });
+      if (path.endsWith("/devices")) return json({ devices: [{ id: firstId, name: "Hall", connected: serverEnvelope.device.connected, last_seen: serverEnvelope.device.last_seen, applied_revision: serverEnvelope.device.applied_revision, desired_revision: serverEnvelope.revision, firmware: "1.0", ip: "192.0.2.10", ssid: "Test" }], max_devices: 8 });
+      if (path.endsWith("/connections")) return json(connections);
+      if (path.endsWith("/updates")) return json({ current_version: "1.0", available_version: "", update_available: false, device_connected: true });
+      if (path.endsWith(`/devices/${firstId}/settings`) && init?.method === "PATCH") {
+        patchBody = JSON.parse(String(init.body));
+        return new Promise((_resolve, reject) => { losePatch = () => reject(new Error("connection lost")); });
+      }
+      if (path.endsWith(`/devices/${firstId}/settings`)) return json(structuredClone(serverEnvelope));
+      return json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    const city = await screen.findByLabelText("Подпись города");
+    fireEvent.change(city, { target: { value: "Novi Sad" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения" }));
+    await waitFor(() => expect(losePatch).toBeTypeOf("function"));
+    losePatch();
+    expect(await screen.findByText("Результат сохранения не подтверждён")).toBeTruthy();
+    expect(screen.getByText("Проверяется текущая версия настроек")).toBeTruthy();
+    expect(screen.queryByText("Настройки подтверждены устройством")).toBeNull();
+    expect((screen.getByLabelText("Подпись города") as HTMLInputElement).value).toBe("Novi Sad");
+
+    // The first read saw the unchanged base. The server can still finish the PATCH later.
+    serverEnvelope = structuredClone(serverEnvelope);
+    serverEnvelope.revision = 3;
+    serverEnvelope.settings = patchBody.settings;
+    serverEnvelope.device.applied_revision = 2;
+    fireEvent.click(screen.getByRole("button", { name: "Проверить статус" }));
+    expect(await screen.findByText("Сохранено в Bridge")).toBeTruthy();
+    expect(screen.getByText("Ожидает применения дисплеем")).toBeTruthy();
+    expect((screen.getByLabelText("Подпись города") as HTMLInputElement).value).toBe("Novi Sad");
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(1);
+  });
+
+  it("ignores an older status read that returns after a successful save", async () => {
+    let serverEnvelope = settingsEnvelope(firstId, "Hall");
+    let deferNextRead = false;
+    let releaseOldRead!: (response: Response) => void;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path.endsWith("/session")) return json({ authenticated: true, password_enabled: true, cloudflare_enabled: false, csrf_token: "csrf" });
+      if (path.endsWith("/devices")) return json({ devices: [{ id: firstId, name: "Hall", connected: true, last_seen: new Date().toISOString(), applied_revision: serverEnvelope.device.applied_revision, desired_revision: serverEnvelope.revision, firmware: "1.0", ip: "192.0.2.10", ssid: "Test" }], max_devices: 8 });
+      if (path.endsWith("/connections")) return json(connections);
+      if (path.endsWith("/updates")) return json({ current_version: "1.0", available_version: "", update_available: false, device_connected: true });
+      if (path.endsWith(`/devices/${firstId}/settings`) && init?.method === "PATCH") {
+        const body = JSON.parse(String(init.body));
+        serverEnvelope = structuredClone(serverEnvelope);
+        serverEnvelope.revision = 3;
+        serverEnvelope.settings = body.settings;
+        serverEnvelope.device.applied_revision = 2;
+        return json(structuredClone(serverEnvelope));
+      }
+      if (path.endsWith(`/devices/${firstId}/settings`)) {
+        if (deferNextRead) {
+          deferNextRead = false;
+          return new Promise<Response>((resolve) => { releaseOldRead = resolve; });
+        }
+        return json(structuredClone(serverEnvelope));
+      }
+      return json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<App />);
+    await screen.findByLabelText("Подпись города");
+    fireEvent.click(screen.getByRole("button", { name: "Об устройстве" }));
+    deferNextRead = true;
+    fireEvent.click(screen.getByRole("button", { name: "Обновить статус" }));
+    await waitFor(() => expect(releaseOldRead).toBeTypeOf("function"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Экран" }));
+    fireEvent.change(await screen.findByLabelText("Подпись города"), { target: { value: "Novi Sad" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения" }));
+    expect(await screen.findByText("Сохранено в Bridge")).toBeTruthy();
+    expect(screen.getByText("Ожидает применения дисплеем")).toBeTruthy();
+
+    releaseOldRead(json(settingsEnvelope(firstId, "Hall")));
+    await waitFor(() => expect(screen.getByText("Ожидает применения дисплеем")).toBeTruthy());
+    expect((screen.getByLabelText("Подпись города") as HTMLInputElement).value).toBe("Novi Sad");
+  });
+
+  it("does not infer success or failure for a write-only key from unchanged settings", async () => {
+    const serverEnvelope = settingsEnvelope(firstId, "Hall");
+    let losePatch!: () => void;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path.endsWith("/session")) return json({ authenticated: true, password_enabled: true, cloudflare_enabled: false, csrf_token: "csrf" });
+      if (path.endsWith("/devices")) return json({ devices: [{ id: firstId, name: "Hall", connected: true, last_seen: new Date().toISOString(), applied_revision: 2, desired_revision: 2, firmware: "1.0", ip: "192.0.2.10", ssid: "Test" }], max_devices: 8 });
+      if (path.endsWith("/connections")) return json(connections);
+      if (path.endsWith("/updates")) return json({ current_version: "1.0", available_version: "", update_available: false, device_connected: true });
+      if (path.endsWith(`/devices/${firstId}/settings`) && init?.method === "PATCH")
+        return new Promise((_resolve, reject) => { losePatch = () => reject(new Error("connection lost")); });
+      if (path.endsWith(`/devices/${firstId}/settings`)) return json(structuredClone(serverEnvelope));
+      return json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    await screen.findByLabelText("Подпись города");
+    fireEvent.click(screen.getByRole("button", { name: "Сеть и Bridge" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Изменить сеть" }));
+    fireEvent.change(screen.getByLabelText("Пароль Wi-Fi"), { target: { value: "write-only-test" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения" }));
+    await waitFor(() => expect(losePatch).toBeTypeOf("function"));
+    losePatch();
+    expect(await screen.findByText("Результат сохранения не подтверждён")).toBeTruthy();
+    expect(screen.getByText(/Записанные ключи нельзя проверить через настройки/)).toBeTruthy();
+    expect(screen.queryByText("Bridge не сохранил изменения. Ваш черновик остался в форме.")).toBeNull();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(1);
+  });
+
+  it("retains the last status after a failed GET and lets the user check again", async () => {
+    let failNextSettingsRead = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void init;
+      const path = String(input);
+      if (path.endsWith("/session")) return json({ authenticated: true, password_enabled: true, cloudflare_enabled: false, csrf_token: "csrf" });
+      if (path.endsWith("/devices")) return json({ devices: [{ id: firstId, name: "Hall", connected: true, last_seen: new Date().toISOString(), applied_revision: 2, desired_revision: 2, firmware: "1.0", ip: "192.0.2.10", ssid: "Test" }], max_devices: 8 });
+      if (path.endsWith("/connections")) return json(connections);
+      if (path.endsWith("/updates")) return json({ current_version: "1.0", available_version: "", update_available: false, device_connected: true });
+      if (path.endsWith(`/devices/${firstId}/settings`) && failNextSettingsRead) {
+        failNextSettingsRead = false;
+        return new Response(JSON.stringify({ error: "temporary_failure" }), { status: 503, headers: { "Content-Type": "application/json" } });
+      }
+      if (path.endsWith(`/devices/${firstId}/settings`)) return json(settingsEnvelope(firstId, "Hall"));
+      return json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    await screen.findByLabelText("Подпись города");
+    fireEvent.click(screen.getByRole("button", { name: "Об устройстве" }));
+    failNextSettingsRead = true;
+    fireEvent.click(screen.getByRole("button", { name: "Обновить статус" }));
+    expect(await screen.findByText("Не удалось обновить статус. Показано последнее известное состояние.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Проверить статус" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Проверить статус" }));
+    await waitFor(() => expect(screen.queryByText("Не удалось обновить статус. Показано последнее известное состояние.")).toBeNull());
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(0);
+    expect(fetchMock.mock.calls.some(([path, init]) => String(path).endsWith(`/devices/${firstId}/settings`) && (init?.method ?? "GET") === "GET")).toBe(true);
+  });
+
+  it.each([
+    [409, "revision_conflict"],
+    [422, "invalid_settings"],
+    [503, "settings_unavailable"],
+  ] as const)("keeps the user's draft after a %i settings rejection", async (status, error) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path.endsWith("/session")) return json({ authenticated: true, password_enabled: true, cloudflare_enabled: false, csrf_token: "csrf" });
+      if (path.endsWith("/devices")) return json({ devices: [{ id: firstId, name: "Hall", connected: true, last_seen: new Date().toISOString(), applied_revision: 2, desired_revision: 2, firmware: "1.0", ip: "192.0.2.10", ssid: "Test" }], max_devices: 8 });
+      if (path.endsWith("/connections")) return json(connections);
+      if (path.endsWith("/updates")) return json({ current_version: "1.0", available_version: "", update_available: false, device_connected: true });
+      if (path.endsWith(`/devices/${firstId}/settings`) && init?.method === "PATCH")
+        return new Response(JSON.stringify({ error }), { status, headers: { "Content-Type": "application/json" } });
+      if (path.endsWith(`/devices/${firstId}/settings`)) {
+        const latest = settingsEnvelope(firstId, "Hall");
+        if (status === 409) latest.revision = 3;
+        return json(latest);
+      }
+      return json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    const city = await screen.findByLabelText("Подпись города");
+    fireEvent.change(city, { target: { value: "Draft city" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения" }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(1));
+    expect((screen.getByLabelText("Подпись города") as HTMLInputElement).value).toBe("Draft city");
+    expect(screen.getByText("Есть несохранённые изменения")).toBeTruthy();
+  });
+
+  it("reconciles a late matching commit from background polling without a conflict or duplicate PATCH", async () => {
+    vi.useFakeTimers();
+    let serverEnvelope = settingsEnvelope(firstId, "Hall");
+    let patchBody: any;
+    let losePatch!: () => void;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path.endsWith("/session")) return json({ authenticated: true, password_enabled: true, cloudflare_enabled: false, csrf_token: "csrf" });
+      if (path.endsWith("/devices")) return json({ devices: [{ id: firstId, name: "Hall", connected: true, last_seen: new Date().toISOString(), applied_revision: serverEnvelope.device.applied_revision, desired_revision: serverEnvelope.revision, firmware: "1.0", ip: "192.0.2.10", ssid: "Test" }], max_devices: 8 });
+      if (path.endsWith("/connections")) return json(connections);
+      if (path.endsWith("/updates")) return json({ current_version: "1.0", available_version: "", update_available: false, device_connected: true });
+      if (path.endsWith(`/devices/${firstId}/settings`) && init?.method === "PATCH") {
+        patchBody = JSON.parse(String(init.body));
+        return new Promise((_resolve, reject) => { losePatch = () => reject(new Error("connection lost")); });
+      }
+      if (path.endsWith(`/devices/${firstId}/settings`)) return json(structuredClone(serverEnvelope));
+      return json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    await act(async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); });
+    const city = screen.getByLabelText("Подпись города");
+    fireEvent.change(city, { target: { value: "Novi Sad" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения" }));
+    await act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); });
+    expect(losePatch).toBeTypeOf("function");
+    await act(async () => { losePatch(); for (let i = 0; i < 30; i++) await Promise.resolve(); });
+    expect(screen.getByText("Результат сохранения не подтверждён")).toBeTruthy();
+
+    serverEnvelope = structuredClone(serverEnvelope);
+    serverEnvelope.revision = 3;
+    serverEnvelope.settings = patchBody.settings;
+    serverEnvelope.device.applied_revision = 2;
+    await act(async () => { await vi.advanceTimersByTimeAsync(8_000); });
+
+    expect(screen.getByText("Сохранено в Bridge")).toBeTruthy();
+    expect(screen.getByText("Ожидает применения дисплеем")).toBeTruthy();
+    expect(screen.queryByText("Настройки в Bridge изменились после запроса. Ваш черновик сохранён; сравните его с актуальными данными.")).toBeNull();
+    expect(screen.queryByText("Есть несохранённые изменения")).toBeNull();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(1);
+  });
+
+  it("preserves edits made while a successful PATCH is pending", async () => {
+    let resolvePatch!: (response: Response) => void;
+    let submittedSettings: any;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path.endsWith("/session")) return json({ authenticated: true, password_enabled: true, cloudflare_enabled: false, csrf_token: "csrf" });
+      if (path.endsWith("/devices")) return json({ devices: [{ id: firstId, name: "Hall", connected: true, last_seen: new Date().toISOString(), applied_revision: 2, desired_revision: 2, firmware: "1.0", ip: "192.0.2.10", ssid: "Test" }], max_devices: 8 });
+      if (path.endsWith("/connections")) return json(connections);
+      if (path.endsWith("/updates")) return json({ current_version: "1.0", available_version: "", update_available: false, device_connected: true });
+      if (path.endsWith(`/devices/${firstId}/settings`) && init?.method === "PATCH") {
+        submittedSettings = JSON.parse(String(init.body)).settings;
+        return new Promise<Response>((resolve) => { resolvePatch = resolve; });
+      }
+      if (path.endsWith(`/devices/${firstId}/settings`)) return json(settingsEnvelope(firstId, "Hall"));
+      return json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    const city = await screen.findByLabelText("Подпись города");
+    fireEvent.change(city, { target: { value: "Submitted city" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения" }));
+    await waitFor(() => expect(resolvePatch).toBeTypeOf("function"));
+    fireEvent.change(screen.getByLabelText("Подпись города"), { target: { value: "Newer city" } });
+    const response = settingsEnvelope(firstId, "Hall");
+    response.revision = 3;
+    response.settings = submittedSettings;
+    response.device.applied_revision = 2;
+    resolvePatch(json(response));
+
+    expect(await screen.findByText("Отправленные изменения сохранены. Более новые правки остались в черновике.")).toBeTruthy();
+    expect((screen.getByLabelText("Подпись города") as HTMLInputElement).value).toBe("Newer city");
+    expect(screen.getByText("Есть несохранённые изменения")).toBeTruthy();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(1);
+  });
+
+  it("does not mark the newly selected display stale when an old display read fails", async () => {
+    let deferOldRead = false;
+    let failOldRead!: () => void;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.endsWith("/session")) return json({ authenticated: true, password_enabled: true, cloudflare_enabled: false, csrf_token: "csrf" });
+      if (path.endsWith("/devices")) return json({ devices: [
+        { id: firstId, name: "Hall", connected: true, last_seen: new Date().toISOString(), applied_revision: 2, desired_revision: 2, firmware: "1.0", ip: "192.0.2.10", ssid: "Test" },
+        { id: secondId, name: "Office", connected: true, last_seen: new Date().toISOString(), applied_revision: 2, desired_revision: 2, firmware: "1.0", ip: "192.0.2.11", ssid: "Test" },
+      ], max_devices: 8 });
+      if (path.endsWith("/connections")) return json(connections);
+      if (path.endsWith("/updates")) return json({ current_version: "1.0", available_version: "", update_available: false, device_connected: true });
+      if (path.endsWith(`/devices/${firstId}/settings`) && deferOldRead) {
+        deferOldRead = false;
+        return new Promise((_resolve, reject) => { failOldRead = () => reject(new Error("old display disconnected")); });
+      }
+      const match = path.match(/\/devices\/([a-f0-9]{32})\/settings$/);
+      if (match) return json(settingsEnvelope(match[1], match[1] === firstId ? "Hall" : "Office"));
+      return json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    await screen.findByLabelText("Имя дисплея");
+    fireEvent.click(screen.getByRole("button", { name: "Об устройстве" }));
+    deferOldRead = true;
+    fireEvent.click(screen.getByRole("button", { name: "Обновить статус" }));
+    await waitFor(() => expect(failOldRead).toBeTypeOf("function"));
+
+    fireEvent.change(screen.getByLabelText("Выбрать дисплей"), { target: { value: secondId } });
+    expect((await screen.findAllByText("Office")).length).toBeGreaterThan(0);
+    await act(async () => { failOldRead(); for (let i = 0; i < 10; i++) await Promise.resolve(); });
+    expect(screen.queryByText("Не удалось обновить статус. Показано последнее известное состояние.")).toBeNull();
   });
 });

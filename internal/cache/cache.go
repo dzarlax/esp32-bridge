@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -59,6 +60,10 @@ func (c *Cache) Delete(key string) {
 // Invalidation starts a new generation so an older in-flight result cannot
 // repopulate the cache after a device action changes that source.
 func (c *Cache) Fetch(key string, ttl time.Duration, fetch func() (json.RawMessage, error)) (json.RawMessage, time.Time, error) {
+	return c.FetchContext(context.Background(), key, ttl, fetch)
+}
+
+func (c *Cache) FetchContext(ctx context.Context, key string, ttl time.Duration, fetch func() (json.RawMessage, error)) (json.RawMessage, time.Time, error) {
 	c.mu.Lock()
 	if e, ok := c.entries[key]; ok && time.Now().Before(e.expiresAt) {
 		c.mu.Unlock()
@@ -67,8 +72,12 @@ func (c *Cache) Fetch(key string, ttl time.Duration, fetch func() (json.RawMessa
 	gen := c.generation[key]
 	if existing := c.pending[key]; existing != nil && existing.generation == gen {
 		c.mu.Unlock()
-		<-existing.done
-		return existing.data, existing.at, existing.err
+		select {
+		case <-existing.done:
+			return existing.data, existing.at, existing.err
+		case <-ctx.Done():
+			return nil, time.Time{}, ctx.Err()
+		}
 	}
 	current := &call{done: make(chan struct{}), generation: gen}
 	c.pending[key] = current

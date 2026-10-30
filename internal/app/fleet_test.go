@@ -283,3 +283,46 @@ func TestManagedImmichAlbumsDoNotShareFrames(t *testing.T) {
 		t.Fatal("disconnected A still serves cached frame")
 	}
 }
+
+func TestHAStateUsesDeviceSelection(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"entity_id":%q,"state":"on"}`, strings.TrimPrefix(r.URL.Path, "/api/states/"))
+	}))
+	defer upstream.Close()
+	cfg := testConfig()
+	cfg.PhotoEnabled = false
+	f, err := NewFleet(cfg, upstream.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		for _, m := range f.current.Load().nodes {
+			m.current.Load().cancel()
+		}
+	}()
+	a := settings.Defaults(cfg, "")
+	b := settings.Defaults(cfg, "")
+	a.Services["home"] = settings.Service{Enabled: true, BaseURL: upstream.URL, Lights: []string{"light.one"}}
+	b.Services["home"] = settings.Service{Enabled: true, BaseURL: upstream.URL, Lights: []string{"light.two"}}
+	secrets := DefaultSecrets(cfg)
+	secrets["ha_token"] = "synthetic-token"
+	commit, _, err := f.Prepare(map[string]settings.Values{"": settings.Defaults(cfg, ""), deviceA: a, deviceB: b}, secrets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit()
+	f.strict.Store(true)
+	for _, tc := range []struct {
+		id, path string
+		want     int
+	}{{deviceA, "/api/ha/state?entity_id=light.one", 200}, {deviceA, "/api/ha/state?entity_id=light.two", 400}, {deviceB, "/api/ha/state?entity_id=light.one", 400}, {deviceB, "/api/ha/state?entity_id=light.two", 200}} {
+		req := httptest.NewRequest("GET", tc.path, nil)
+		req.Header.Set("X-API-Key", cfg.APIKey)
+		req.Header.Set("X-Device-ID", tc.id)
+		w := httptest.NewRecorder()
+		f.ServeHTTP(w, req)
+		if w.Code != tc.want {
+			t.Fatalf("device %s path %s status %d: %s", tc.id, tc.path, w.Code, w.Body)
+		}
+	}
+}

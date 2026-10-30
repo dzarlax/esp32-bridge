@@ -89,12 +89,16 @@ func (o *Orchestrator) Invalidate(name string) {
 
 // FetchOne fetches a single named fetcher, bypassing cache, and updates it.
 func (o *Orchestrator) FetchOne(name string) json.RawMessage {
+	return o.FetchOneContext(context.Background(), name)
+}
+
+func (o *Orchestrator) FetchOneContext(parent context.Context, name string) json.RawMessage {
 	for _, f := range o.fetchers {
 		if f.Name() == name {
 			o.invalidateFetcher(f)
-			ctx, cancel := context.WithTimeout(context.Background(), o.timeout)
+			ctx, cancel := context.WithTimeout(parent, o.timeout)
 			defer cancel()
-			data, at, err := o.cache.Fetch(cacheKey(f), f.TTL(), func() (json.RawMessage, error) { return f.Fetch(ctx) })
+			data, at, err := o.cache.FetchContext(ctx, cacheKey(f), f.TTL(), func() (json.RawMessage, error) { return f.Fetch(ctx) })
 			if err != nil {
 				o.record(name, false)
 				log.Printf("[%s] fetch failed", name)

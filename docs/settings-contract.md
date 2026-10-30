@@ -208,3 +208,23 @@ The matching network rollback locale uses a separate sidecar as well. A failed
 prefs commit blocks further sync acknowledgment until a successful save/recovery
 or reboot reconciles runtime and durable state. No credential or identity
 namespace is erased by locale migration.
+
+## Home Assistant action feedback
+
+`POST /api/ha/action` retains the legacy `ok` and optional `lights`/`climate`
+fields. A successful service call adds `action_result.state = "accepted"` and,
+when available, a fresh direct `observation` for the requested entity. Acceptance
+means the service call succeeded; only a matching available observation confirms
+Home Assistant's state. It does not prove physical actuation. Errors use safe
+codes; a transport failure after dispatch has `state = "unknown"` because the
+service may have executed. The server does not repeat a command. The request has
+an eight-second overall upstream budget.
+
+`GET /api/ha/state?entity_id=<id>` uses the same API key and device routing,
+validates the exact entity against that device's selected lights or climates, and
+reads Home Assistant directly with a two-second budget. It returns
+`{"observation":{"entity_id":"...","kind":"light|climate","available":true,"state":"...","target_temperature":22}}`;
+the optional target applies to climate only. Unavailable, unknown and invalid
+states produce `available:false`; a malformed response or mismatched entity
+returns a safe error. Neither legacy snapshots nor unavailable states are proof
+of an action. Older Bridges may return 404 for this read-only endpoint.
