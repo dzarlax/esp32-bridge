@@ -14,7 +14,10 @@ export function hasCurrentApplicationAck(envelope: Envelope): boolean {
   const localeMatches = device.capabilities.includes("locale")
     ? device.applied_locale === desiredLocale
     : desiredLocale === "ru";
-  return localeMatches;
+  const screen = envelope.settings.screen;
+  const unsupportedFavorites = (envelope.settings.services?.home?.favorites?.length ?? 0) > 0 && !device.capabilities.includes("home_favorites");
+  const brightnessRequested = screen.backlight_percent != null || screen.night_backlight_percent != null || (screen.night_action != null && screen.night_action !== "off");
+  return localeMatches && !unsupportedFavorites && !(brightnessRequested && !device.capabilities.includes("backlight_brightness"));
 }
 
 export function applicationState(

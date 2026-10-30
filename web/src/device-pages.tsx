@@ -160,26 +160,30 @@ export function UpdatesPage({
             {updates.history.map((item, index) => (
               <div
                 className="history-item"
-                key={`${item.version}-${item.at ?? index}`}
+                key={item.id || `${item.version}-${index}`}
               >
-                <strong>{item.version}</strong>
+                <strong>{item.version || t("Версия неизвестна")}</strong>
                 <StatusPill
                   state={
-                    item.state === "succeeded" || item.state === "installed"
+                    item.state === "succeeded"
                       ? "good"
                       : item.state === "failed"
                         ? "bad"
                         : "muted"
                   }
-                  label={item.state}
+                  label={t(({ queued: "В очереди", accepted: "Принята", succeeded: "Установлена", failed: "Ошибка", unknown: "Подтверждение не получено" } as Record<string, string>)[item.state] ?? "Статус неизвестен")}
                 />
                 {item.at && <time>{new Date(item.at).toLocaleString(dateLocale(locale))}</time>}
+                {item.previous_version && <small>{t("Предыдущая версия")}: {item.previous_version}</small>}
+                {item.installed_version && <small>{t("Подтверждённая версия")}: {item.installed_version}</small>}
+                {item.stage && <small>{t(({ checking: "Проверка", downloading: "Загрузка", verifying: "Проверка файла", writing: "Запись", rebooting: "Перезагрузка" } as Record<string, string>)[item.stage] ?? "Этап неизвестен")}</small>}
+                {item.error && <small>{t(({ ota_check_failed: "Ошибка проверки обновлений", no_update: "Обновление недоступно", download_failed: "Ошибка загрузки", validation_failed: "Ошибка проверки файла", flash_failed: "Ошибка записи", device_error: "Ошибка устройства", unknown: "Причина неизвестна" } as Record<string, string>)[item.error] ?? "Причина неизвестна")}</small>}
               </div>
             ))}
           </div>
         ) : (
           <p className="muted">
-            {" "}{t("История обновлений пока не сообщается устройством.")}{" "}</p>
+            {" "}{t("Попыток обновления пока нет.")}{" "}</p>
         )}
       </section>
       {pendingCommand &&

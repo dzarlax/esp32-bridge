@@ -302,6 +302,28 @@ describe("settings screen field interactions", () => {
     expect(screen.getByRole("switch", { name: event })).toBeTruthy();
   });
 
+  it("gates brightness and sends a bounded preview without editing settings", () => {
+    const props = pageProps();
+    props.envelope.device.capabilities.push("backlight_preview", "backlight_restore");
+    render(<ScreenPage {...props} />);
+    expect((screen.getByLabelText("Дневная яркость") as HTMLInputElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Яркость проверки"), { target: { value: "30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить на 20 секунд" }));
+    expect(props.runAction).toHaveBeenCalledWith("backlight_preview", 30);
+    expect(props.edit).not.toHaveBeenCalled();
+  });
+
+  it("reorders configured favorites with keyboard-accessible buttons", () => {
+    const props = pageProps();
+    props.serviceDetail = "home";
+    props.envelope.device.capabilities.push("home_favorites");
+    props.draft.services.home.lights = ["light.a", "light.b"];
+    props.draft.services.home.favorites = [{ entity_id: "light.a", kind: "light" }, { entity_id: "light.b", kind: "light" }];
+    render(<ServicesPage {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Переместить выше light.b" }));
+    expect(props.edit).toHaveBeenCalledWith(expect.objectContaining({ services: expect.objectContaining({ home: expect.objectContaining({ favorites: [{ entity_id: "light.b", kind: "light" }, { entity_id: "light.a", kind: "light" }] }) }) }));
+  });
+
   it("labels the night-mode switch with its current state", () => {
     const props = pageProps();
     render(<ScreenPage {...props} />);

@@ -33,6 +33,18 @@ describe("settings application status", () => {
     }))).toBe(true);
   });
 
+  it("does not acknowledge unsupported favorites or brightness", () => {
+    const base = envelope();
+    base.settings.services = { home: { favorites: [{ entity_id: "light.kitchen", kind: "light" }] } } as Envelope["settings"]["services"];
+    expect(hasCurrentApplicationAck(base)).toBe(false);
+    base.device.capabilities.push("home_favorites");
+    expect(hasCurrentApplicationAck(base)).toBe(true);
+    base.settings.screen.backlight_percent = 40;
+    expect(hasCurrentApplicationAck(base)).toBe(false);
+    base.device.capabilities.push("backlight_brightness");
+    expect(hasCurrentApplicationAck(base)).toBe(true);
+  });
+
   it("keeps offline devices in the waiting state and shows overdue confirmation only while online", () => {
     const pendingOffline = envelope({ device: { ...envelope().device, connected: false, applied_revision: 0 } });
     const pendingOnline = envelope({ device: { ...envelope().device, applied_revision: 0 } });

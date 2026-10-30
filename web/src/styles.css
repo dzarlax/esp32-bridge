@@ -1801,3 +1801,54 @@ input[aria-invalid="true"] {
   .language-select > span { display: none; }
   .header-meta .language-select select { min-height: 32px; }
 }
+
+.catalog-option { display: flex; align-items: flex-start; gap: .6rem; margin: .5rem 0; overflow-wrap: anywhere; }
+.catalog-option small { display: block; }
+.favorite-item { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; margin: .5rem 0; }
+.favorite-item span { overflow-wrap: anywhere; }
+.favorite-item input { min-width: 0; max-width: 14rem; }
+.favorites-editor { margin: 1rem 0; }
+
+.catalog-controls { display: flex; gap: .5rem; flex-wrap: wrap; margin: .5rem 0; }
+.catalog-controls input { flex: 1 1 12rem; min-width: 0; }
+.catalog-list { max-height: 20rem; overflow-y: auto; overscroll-behavior: contain; }
+.catalog-retained { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; margin: .5rem 0; overflow-wrap: anywhere; }
+
+/* The source settings occupy a half-width column, so their labels need their own row. */
+.photos-source-column .nested-form .field {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  min-height: auto;
+  align-items: start;
+}
+.photos-source-column .nested-form .shared-connection-field {
+  flex-wrap: wrap;
+}
+.photos-source-column .nested-form .shared-connection-field > input {
+  flex: 1 1 100%;
+}
+.catalog-controls {
+  flex-direction: column;
+  align-items: flex-start;
+}
+.field-control .catalog-controls input[type="search"] {
+  flex: none;
+  width: 100%;
+}
+.catalog-option {
+  min-height: 44px;
+  align-items: flex-start;
+  padding: 6px 0;
+  cursor: pointer;
+}
+.field-control .catalog-option input[type="radio"],
+.field-control .catalog-option input[type="checkbox"] {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  padding: 0;
+  margin: 2px 0 0;
+  accent-color: var(--teal);
+}
+.catalog-option span { min-width: 0; }

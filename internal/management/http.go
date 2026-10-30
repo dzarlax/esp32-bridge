@@ -16,10 +16,12 @@ import (
 )
 
 type API struct {
-	Store     *settings.Store
-	DeviceKey string
-	Statuses  func(string) map[string]settings.Status
-	Updates   func(string, string) map[string]any
+	catalogs      catalogCache
+	catalogClient *http.Client
+	Store         *settings.Store
+	DeviceKey     string
+	Statuses      func(string) map[string]settings.Status
+	Updates       func(string, string) map[string]any
 }
 
 func (a *API) Register(mux *http.ServeMux, require func(http.Handler) http.Handler) {
@@ -214,6 +216,8 @@ func (a *API) deviceRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	id := parts[0]
 	switch parts[1] {
+	case "albums", "calendars":
+		a.catalog(w, r, id, parts[1])
 	case "settings":
 		a.deviceSettings(w, r, id)
 	case "actions":
@@ -291,12 +295,20 @@ func (a *API) deviceActions(w http.ResponseWriter, r *http.Request, id string) {
 	var req struct {
 		Action  string `json:"action"`
 		Confirm bool   `json:"confirm"`
+		Percent *int   `json:"percent,omitempty"`
 	}
 	if err := decode(w, r, &req); err != nil {
 		failure(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	command, err := a.Store.Enqueue(id, req.Action, req.Confirm)
+	target := ""
+	if req.Action == "ota_install" && a.Updates != nil {
+		view, e := a.Store.View(id, nil)
+		if e == nil {
+			target, _ = a.Updates(id, view.Device.Firmware)["available_version"].(string)
+		}
+	}
+	command, err := a.Store.EnqueueOptions(id, req.Action, req.Confirm, req.Percent, target)
 	if err != nil {
 		apiError(w, err)
 		return
@@ -321,6 +333,12 @@ func (a *API) deviceUpdates(w http.ResponseWriter, r *http.Request, id string) {
 	if result == nil {
 		result = map[string]any{}
 	}
+	history, err := a.Store.OTAHistory(id)
+	if err != nil {
+		apiError(w, err)
+		return
+	}
+	result["history"] = history
 	result["device_connected"] = view.Device.Connected
 	output(w, http.StatusOK, result)
 }

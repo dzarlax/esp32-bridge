@@ -94,6 +94,12 @@ func TestMultiDeviceManagementRoutesAndNativeIdentity(t *testing.T) {
 	if w := call("GET", "/api/admin/v1/devices", nil, nil, "", "", "", ""); w.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated admin request=%d", w.Code)
 	}
+	for _, kind := range []string{"albums", "calendars"} {
+		path := "/api/admin/v1/devices/" + strings.Repeat("a", 32) + "/" + kind
+		if w := call("GET", path, nil, nil, "", "", "device-api-key", ""); w.Code != http.StatusUnauthorized {
+			t.Fatalf("%s accepted device key without admin session: %d", kind, w.Code)
+		}
+	}
 	login := call("POST", "/api/admin/v1/login", map[string]string{"password": password}, nil, "", "", "", "")
 	if login.Code != http.StatusOK {
 		t.Fatalf("login=%d %s", login.Code, login.Body.String())

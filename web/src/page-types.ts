@@ -30,5 +30,5 @@ export type PageProps = {
   identity?: Session["identity"];
   refreshStatus: () => Promise<void>;
   downloadDiagnostics: () => Promise<void>;
-  runAction: (action: Ask["action"]) => Promise<void>;
+  runAction: (action: Ask["action"], percent?: number) => Promise<void>;
 };

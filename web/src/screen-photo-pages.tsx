@@ -1,5 +1,6 @@
+import { CatalogPicker } from "./catalog-picker";
 import previewPhoto from "./assets/photo-preview.webp";
-import { useId } from "react";
+import { useId, useState } from "react";
 import { numberError, photoTimingLimits } from "./validation";
 import { type Settings } from "./types";
 import type { PageProps } from "./page-types";
@@ -17,11 +18,12 @@ import {
 } from "./ui";
 import { useT } from "./i18n";
 
-export function ScreenPage({ draft, edit, envelope }: PageProps) {
+export function ScreenPage({ draft, edit, envelope, runAction, busy, pendingCommand }: PageProps) {
   const t = useT();
   const idleHelp = useId();
+  const [previewPercent, setPreviewPercent] = useState(50);
   const s = draft.screen;
-  const set = (key: keyof Settings["screen"], value: string | boolean) =>
+  const set = (key: keyof Settings["screen"], value: string | boolean | number) =>
     edit({ ...draft, screen: { ...s, [key]: value } });
   return (
     <>
@@ -137,7 +139,7 @@ export function ScreenPage({ draft, edit, envelope }: PageProps) {
             />
           </div>
           <small>
-            {" "}{t("Касание разбудит экран. Яркость недоступна: устройство не сообщает эту возможность.")}{" "}</small>
+            {" "}{t("Касание разбудит экран.")}{" "}</small>
         </Field>
       </section>
       <section className="settings-section">
@@ -154,13 +156,14 @@ export function ScreenPage({ draft, edit, envelope }: PageProps) {
           }
         >
           {" "}{t("Яркость")}{" "}</SectionHeading>
-        <Field label={t("Управление яркостью")}>
-          <TextInput
-            disabled
-            value={t("Недоступно для этого устройства")}
-            aria-label={t("Яркость не поддерживается")}
-          />
-        </Field>
+        {!envelope.capabilities.brightness && <p>{t("Яркость недоступна до проверки и калибровки подсветки устройства.")}</p>}
+        {envelope.device.backlight_percent !== undefined && <p>{t("Фактическая яркость")}: {envelope.device.backlight_percent}%</p>}
+        <Field label={t("Дневная яркость")}><input type="range" min={10} max={100} value={s.backlight_percent ?? 100} disabled={!envelope.capabilities.brightness} onChange={(e) => set("backlight_percent", Number(e.target.value))} /> <span>{s.backlight_percent ?? 100}%</span></Field>
+        <Field label={t("Ночное действие")}><Select value={s.night_action || "off"} disabled={!envelope.capabilities.brightness} onChange={(e) => { const action = e.target.value as "off" | "dim"; edit({ ...draft, screen: { ...s, night_action: action, ...(action === "dim" ? { backlight_percent: s.backlight_percent ?? 100, night_backlight_percent: s.night_backlight_percent ?? 20 } : {}) } }); }}><option value="off">{t("Выключить экран")}</option><option value="dim">{t("Уменьшить яркость")}</option></Select></Field>
+        {s.night_action === "dim" && <Field label={t("Ночная яркость")}><input type="range" min={10} max={100} value={s.night_backlight_percent ?? 20} disabled={!envelope.capabilities.brightness} onChange={(e) => set("night_backlight_percent", Number(e.target.value))} /> <span>{s.night_backlight_percent ?? 20}%</span></Field>}
+        {envelope.device.backlight_error && <p>{t("Устройство сообщает об ошибке подсветки.")}</p>}
+        {envelope.device.capabilities.includes("backlight_preview") && <div><Field label={t("Яркость проверки")}><input type="range" min={10} max={100} value={previewPercent} onChange={(e) => setPreviewPercent(Number(e.target.value))} /> {previewPercent}%</Field><button type="button" className="button secondary" disabled={!canRun(envelope.device, "backlight_preview") || busy || pendingCommand} onClick={() => void runAction("backlight_preview", previewPercent)}>{t("Проверить на 20 секунд")}</button> <small>{t("После проверки устройство восстановит прежнюю яркость.")}</small></div>}
+        {envelope.device.capabilities.includes("backlight_restore") && <button type="button" className="button secondary" disabled={!canRun(envelope.device, "backlight_restore") || busy || pendingCommand} onClick={() => void runAction("backlight_restore")}>{t("Восстановить яркость")}</button>}
       </section>
     </>
   );
@@ -171,6 +174,7 @@ export function PhotosPage({
   edit,
   envelope,
   onOpenConnections,
+  deviceId,
   runAction,
   busy,
 }: PageProps) {
@@ -285,16 +289,8 @@ export function PhotosPage({
                     <button className="button secondary" type="button" onClick={onOpenConnections}>{t("Общие подключения")}</button>
                   </div>
                 </Field>
-                <Field
-                  label="Album ID"
-                  help={t("Введите UUID альбома из Immich. Выбор из списка пока не поддерживается панелью.")}
-                >
-                  <TextInput
-                    value={p.album_id}
-                    placeholder={t("UUID альбома")}
-                    onChange={(e) => set("album_id", e.target.value)}
-                  />
-                </Field>
+                <Field label={t("Альбом")}><CatalogPicker deviceId={deviceId} kind="albums" selected={p.album_id ? [p.album_id] : []} onChange={(ids) => set("album_id", ids[0] ?? "")} /></Field>
+                <details><summary>{t("Дополнительно: ID вручную")}</summary><Field label="Album ID" help={t("UUID альбома")}><TextInput value={p.album_id} placeholder={t("UUID альбома")} onChange={(e) => set("album_id", e.target.value)} /></Field></details>
                 <small>{envelope.secrets_present.immich_api_key ? t("Ключ Immich сохранён для общих подключений.") : t("Ключ Immich ещё не настроен.")}</small>
               </div>
             )}
