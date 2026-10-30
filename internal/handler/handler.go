@@ -21,6 +21,7 @@ import (
 
 type Handler struct {
 	photoFrame              *photoframe.Service
+	overlay                 *overlayState
 	orch                    *fetcher.Orchestrator
 	apiKey                  string
 	haBaseURL               string
@@ -367,6 +368,7 @@ type calendarPlatformEventTime struct {
 }
 
 type calendarPlatformEvent struct {
+	ID         string                    `json:"id"`
 	CalendarID string                    `json:"calendar_id"`
 	Title      string                    `json:"title"`
 	Status     string                    `json:"status"`
@@ -374,7 +376,7 @@ type calendarPlatformEvent struct {
 	End        calendarPlatformEventTime `json:"end"`
 }
 
-func (h *Handler) fetchCalendarPlatformEvents(r *http.Request, dayStart, dayEnd time.Time) ([]model.CalendarEvent, error) {
+func (h *Handler) fetchCalendarPlatformRaw(r *http.Request, dayStart, dayEnd time.Time, strict bool) ([]calendarPlatformEvent, error) {
 	u, err := url.Parse(h.calendarPlatformBaseURL + "/api/native/v1/cached-events")
 	if err != nil {
 		return nil, err
@@ -409,12 +411,23 @@ func (h *Handler) fetchCalendarPlatformEvents(r *http.Request, dayStart, dayEnd 
 	if !payload.Complete {
 		log.Printf("[calendar] Calendar Platform returned a partial result")
 	}
+	if strict && !payload.Complete {
+		return nil, fmt.Errorf("calendar source incomplete")
+	}
+	return payload.Items, nil
+}
+
+func (h *Handler) fetchCalendarPlatformEvents(r *http.Request, dayStart, dayEnd time.Time) ([]model.CalendarEvent, error) {
+	items, err := h.fetchCalendarPlatformRaw(r, dayStart, dayEnd, false)
+	if err != nil {
+		return nil, err
+	}
 	indices := make(map[string]int, len(h.calendarPlatformIDs))
 	for index, id := range h.calendarPlatformIDs {
 		indices[id] = index
 	}
-	result := make([]model.CalendarEvent, 0, len(payload.Items))
-	for _, item := range payload.Items {
+	result := make([]model.CalendarEvent, 0, len(items))
+	for _, item := range items {
 		index, allowed := indices[item.CalendarID]
 		if !allowed || strings.EqualFold(item.Status, "cancelled") {
 			continue
@@ -508,16 +521,33 @@ func isIgnoredCalendar(entityID, name string) bool {
 		strings.Contains(calendarText, "outlook")
 }
 
-func (h *Handler) fetchCalendarEvents(r *http.Request, entityID, date, nextDay string, calIdx int) ([]model.CalendarEvent, error) {
-	u := fmt.Sprintf("%s/api/calendars/%s?start=%sT00:00:00&end=%sT00:00:00",
-		h.haBaseURL, entityID, date, nextDay)
-	req, err := http.NewRequestWithContext(r.Context(), "GET", u, nil)
+type haCalendarEvent struct {
+	ID      string `json:"uid"`
+	Summary string `json:"summary"`
+	Start   struct {
+		Date     string `json:"date"`
+		DateTime string `json:"dateTime"`
+	} `json:"start"`
+	End struct {
+		DateTime string `json:"dateTime"`
+	} `json:"end"`
+}
+
+func (h *Handler) fetchCalendarHARaw(r *http.Request, entityID, start, end string) ([]haCalendarEvent, error) {
+	u, err := url.Parse(h.haBaseURL + "/api/calendars/" + url.PathEscape(entityID))
+	if err != nil {
+		return nil, err
+	}
+	q := u.Query()
+	q.Set("start", start)
+	q.Set("end", end)
+	u.RawQuery = q.Encode()
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+h.haToken)
 	req.Header.Set("Content-Type", "application/json")
-
 	resp, err := h.haClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -526,27 +556,20 @@ func (h *Handler) fetchCalendarEvents(r *http.Request, entityID, date, nextDay s
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-
-	var rawEvents []struct {
-		Summary string `json:"summary"`
-		Start   struct {
-			Date     string `json:"date"`
-			DateTime string `json:"dateTime"`
-		} `json:"start"`
-		End struct {
-			DateTime string `json:"dateTime"`
-		} `json:"end"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&rawEvents); err != nil {
+	var events []haCalendarEvent
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&events); err != nil {
 		return nil, err
 	}
-
+	return events, nil
+}
+func (h *Handler) fetchCalendarEvents(r *http.Request, entityID, date, nextDay string, calIdx int) ([]model.CalendarEvent, error) {
+	rawEvents, err := h.fetchCalendarHARaw(r, entityID, date+"T00:00:00", nextDay+"T00:00:00")
+	if err != nil {
+		return nil, err
+	}
 	var events []model.CalendarEvent
 	for _, e := range rawEvents {
-		ev := model.CalendarEvent{
-			Summary: model.SanitizeForDisplay(e.Summary),
-			CalIdx:  calIdx,
-		}
+		ev := model.CalendarEvent{Summary: model.SanitizeForDisplay(e.Summary), CalIdx: calIdx}
 		if e.Start.Date != "" {
 			ev.AllDay = true
 		} else if e.Start.DateTime != "" {

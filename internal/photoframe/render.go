@@ -24,6 +24,7 @@ var renderSlots = make(chan struct{}, 1)
 type RenderOptions struct {
 	Layout           string
 	CropLimitPercent int
+	ClockShade       bool
 }
 
 func Render(ctx context.Context, r io.Reader) ([]byte, error) {
@@ -80,7 +81,23 @@ func RenderWithOptions(ctx context.Context, r io.Reader, options RenderOptions) 
 	if orient >= 5 {
 		ow, oh = sh, sw
 	}
-	return renderComposed(ctx, orientedPhoto{img: img, width: sw, height: sh, orientation: orient, p3: convertP3}, ow, oh, options)
+	out, err := renderComposed(ctx, orientedPhoto{img: img, width: sw, height: sh, orientation: orient, p3: convertP3}, ow, oh, options)
+	if err != nil || !options.ClockShade {
+		return out, err
+	}
+	for y := 400; y < Height; y++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		shade := 100 - (y-400)*35/200
+		for x := 0; x < Width; x++ {
+			i := (y*Width + x) * 2
+			v := binary.LittleEndian.Uint16(out[i : i+2])
+			r, g, b := int(v>>11)*shade/100, int((v>>5)&63)*shade/100, int(v&31)*shade/100
+			binary.LittleEndian.PutUint16(out[i:i+2], uint16(r<<11|g<<5|b))
+		}
+	}
+	return out, nil
 }
 
 func webPHasProfile(data []byte) bool {

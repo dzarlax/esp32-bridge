@@ -535,3 +535,30 @@ func TestExistingLongCalendarIdentifiersRemainValid(t *testing.T) {
 		t.Fatal("unbounded calendar identifier accepted")
 	}
 }
+
+func TestPhotoOverlaySettingsPersistPerDevice(t *testing.T) {
+	s, dir := newStore(t, nil)
+	a, b := testID('a'), testID('b')
+	register(t, s, a, "a")
+	register(t, s, b, "b")
+	v, _ := s.View(a, nil)
+	off := false
+	v.Settings.Photos.ShowClock = &off
+	v.Settings.Photos.ShowWeather = &off
+	v.Settings.Photos.ShowEvent = &off
+	if err := s.Update(a, v.Revision, Patch{Settings: v.Settings}); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := New(dir, testValues(), map[string]string{"health_api_key": "default-health"}, "https://bridge.example.test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	va, _ := reopened.View(a, nil)
+	vb, _ := reopened.View(b, nil)
+	if va.Settings.Photos.ShowClock == nil || *va.Settings.Photos.ShowClock || va.Settings.Photos.ShowWeather == nil || *va.Settings.Photos.ShowWeather || va.Settings.Photos.ShowEvent == nil || *va.Settings.Photos.ShowEvent {
+		t.Fatal("settings lost")
+	}
+	if vb.Settings.Photos.ShowClock != nil || vb.Settings.Photos.ShowWeather != nil || vb.Settings.Photos.ShowEvent != nil {
+		t.Fatal("other device changed")
+	}
+}

@@ -156,3 +156,23 @@ func (o *Orchestrator) invalidateFetcher(f Fetcher) {
 	}
 	o.cache.Delete(cacheKey(f))
 }
+
+// FetchRecentContext returns source data with its original acquisition time.
+func (o *Orchestrator) FetchRecentContext(parent context.Context, name string, maxAge time.Duration) (json.RawMessage, time.Time) {
+	for _, f := range o.fetchers {
+		if f.Name() != name {
+			continue
+		}
+		key := cacheKey(f)
+		ctx, cancel := context.WithTimeout(parent, o.timeout)
+		defer cancel()
+		data, at, err := o.cache.FetchRecentContext(ctx, key, f.TTL(), maxAge, func() (json.RawMessage, error) { return f.Fetch(ctx) })
+		if err != nil {
+			o.record(name, false)
+			return nil, time.Time{}
+		}
+		o.recordAt(name, at)
+		return data, at
+	}
+	return nil, time.Time{}
+}

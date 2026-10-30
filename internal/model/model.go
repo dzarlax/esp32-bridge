@@ -105,6 +105,7 @@ type WeatherDaily struct {
 }
 
 type WeatherData struct {
+	IsDay       bool           `json:"is_day"`
 	Temp        float64        `json:"temp"`
 	Humidity    float64        `json:"hum"`
 	WindSpeed   float64        `json:"wind"`

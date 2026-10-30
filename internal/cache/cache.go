@@ -132,3 +132,21 @@ func (c *Cache) DeletePrefix(prefix string) {
 		c.generation[key]++
 	}
 }
+
+// FetchRecentContext retains the original source timestamp while coalescing refreshes.
+func (c *Cache) FetchRecentContext(ctx context.Context, key string, ttl, maxAge time.Duration, fetch func() (json.RawMessage, error)) (json.RawMessage, time.Time, error) {
+	c.mu.Lock()
+	if e, ok := c.entries[key]; ok {
+		if time.Since(e.timeStored) < maxAge {
+			c.mu.Unlock()
+			return e.data, e.timeStored, nil
+		}
+		delete(c.entries, key)
+		c.generation[key]++
+	}
+	c.mu.Unlock()
+	if ttl < maxAge {
+		ttl = maxAge
+	}
+	return c.FetchContext(ctx, key, ttl, fetch)
+}

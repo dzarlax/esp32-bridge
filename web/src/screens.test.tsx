@@ -243,6 +243,43 @@ describe("settings screen field interactions", () => {
     );
   });
 
+  it("defaults absent photo overlay settings to enabled and edits each toggle independently", () => {
+    const props = pageProps();
+    delete props.draft.photos.show_clock;
+    delete props.draft.photos.show_weather;
+    delete props.draft.photos.show_event;
+    render(<PhotosPage {...props} />);
+
+    const clock = screen.getByRole("switch", { name: "Часы и дата" }) as HTMLInputElement;
+    const weather = screen.getByRole("switch", { name: "Погода" }) as HTMLInputElement;
+    const event = screen.getByRole("switch", { name: "Ближайшее событие" }) as HTMLInputElement;
+    expect(clock.checked).toBe(true);
+    expect(weather.checked).toBe(true);
+    expect(event.checked).toBe(true);
+
+    fireEvent.click(weather);
+    expect(props.edit).toHaveBeenCalledWith(expect.objectContaining({
+      photos: expect.objectContaining({ show_weather: false }),
+    }));
+    expect(props.edit).not.toHaveBeenCalledWith(expect.objectContaining({
+      photos: expect.objectContaining({ show_clock: false }),
+    }));
+    expect(clock.checked).toBe(true);
+    expect(event.checked).toBe(true);
+  });
+
+  it.each([
+    ["en", "Clock and date", "Weather", "Next event"],
+    ["sr-Latn", "Sat i datum", "Vreme", "Sledeći događaj"],
+  ] as const)("localizes photo overlay controls in %s", (locale, clock, weather, event) => {
+    const props = pageProps();
+    window.localStorage.setItem("homedash.ui.locale", locale);
+    render(<LocaleProvider><PhotosPage {...props} /></LocaleProvider>);
+    expect(screen.getByRole("switch", { name: clock })).toBeTruthy();
+    expect(screen.getByRole("switch", { name: weather })).toBeTruthy();
+    expect(screen.getByRole("switch", { name: event })).toBeTruthy();
+  });
+
   it("labels the night-mode switch with its current state", () => {
     const props = pageProps();
     render(<ScreenPage {...props} />);
