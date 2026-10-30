@@ -1,9 +1,9 @@
-# HomeDash settings contract v2: shared connections, independent displays
+# HomeDash settings contract v3: independent display languages
 
 User-approved: one Bridge serves multiple displays; upstream connections are shared,
 but each display has independent settings, selections, photo album, status and commands.
 Password-only and optional Cloudflare Access login are both supported. Local work only;
-no commit, push, deployment or flash is authorized yet. This replaces unpublished v1.
+no commit, push, deployment or flash is authorized yet. This extends the deployed v2 contract with explicit locale support.
 
 ## Identity and trust
 
@@ -59,15 +59,15 @@ a distinguishable default name until renamed. Persist profiles across restarts.
 GET /api/admin/v1/devices/{id}/settings ->
 {
  device_id,revision,settings:{
-  screen:{name,city,timezone,clock_format,idle_action,night_enabled,night_start,night_end,auto_update_check,auto_install},
+  screen:{locale,name,city,timezone,clock_format,idle_action,night_enabled,night_start,night_end,auto_update_check,auto_install},
   photos:{enabled,source,base_url,album_id,idle_seconds,interval_seconds,order,layout,crop_limit_percent},
   services:{weather:{enabled,latitude,longitude,timezone},calendar:{enabled,base_url,ids,timezone},transport:{enabled,base_url,ids},health:{enabled,base_url},tasks:{enabled},news:{enabled,base_url,limit,since_hours},home:{enabled,base_url,sensors,lights,climates}},
   network:{bridge_url}
  },
  secrets_present:<shared presence flags>,
- device:{connected,last_seen,applied_revision,firmware,boot_id,ip,ssid,uptime_seconds,time_synced,capabilities,error,command,model?,width?,height?,ota_progress?},
+ device:{connected,last_seen,applied_revision,applied_locale?,firmware,boot_id,ip,ssid,uptime_seconds,time_synced,capabilities,error,command,model?,width?,height?,ota_progress?},
  statuses:{service:{state,last_success?,error?}},
- capabilities:{brightness:false,google_photos:false,timezones:["Europe/Belgrade","UTC"]}
+ capabilities:{brightness:false,google_photos:false,locales:["ru","en","sr-Latn"],timezones:["Europe/Belgrade","UTC"]}
 }.
 
 PATCH same scoped settings path, If-Match:"<device desired revision>", body
@@ -109,8 +109,8 @@ not silently target the first connected device.
 ## Native device sync and photo/data routing
 
 POST /api/device/v1/sync, X-API-Key, X-Device-ID, bounded JSON:
-{device_id,bridge_id?,firmware,boot_id,applied_revision,ip,ssid,uptime_seconds,time_synced,
- capabilities:["preferences","photo_start","restart","ota_check","ota_install","reset","network"],
+{device_id,bridge_id?,firmware,boot_id,applied_revision,applied_locale?,ip,ssid,uptime_seconds,time_synced,
+ capabilities:["preferences","photo_start","restart","ota_check","ota_install","reset","network","locale"],
  error?,command_result?:{id,state:"accepted|succeeded|failed",error?},available_version?,ota_progress?,model?,width?,height?}.
 
 Response {device_id,bridge_id,revision,preferences:{screen,photos,visible:{weather,calendar,transport,health,tasks,news,home},posix_timezone,settings_url,network?:{wifi_ssid?,wifi_password?,bridge_url?,bridge_key?}},command:null|{id,action,expires_at}}.
@@ -164,3 +164,47 @@ for both with conflict/failure preservation and explicit disconnect confirmation
 Browser selector must show real profiles, dirty-switch handling and common-vs-device
 scope. Firmware ID stable after reboot/reset/handoff; every API includes its ID.
 No production mutation, publication or firmware flashing as part of local acceptance.
+
+## Localization and persistent compatibility
+
+The independent web language is `ru|en|sr-Latn`, stored in the browser under
+`homedash.ui.locale`. Missing or invalid storage defaults to Russian; storage
+failure permits session-only switching. The web language never changes a device.
+`settings.screen.locale` selects the renderer language for exactly one display,
+defaulting to `ru`. User content, IDs, protocol codes and service data are not
+translated. Formatting uses ru-RU/en-GB/sr-Latn-RS while timezone and clock-format
+settings remain independent.
+
+Changing the device language requires its `locale` capability. A PATCH from an
+older client omitting locale preserves the current value. New firmware negotiates reporting from a validated response containing
+`preferences.screen.locale`. Its first heartbeat omits the extension so older
+strict Bridges can accept it. Reporting is scoped to the Bridge URL; HTTP400
+clears negotiation so a rolled-back Bridge receives a compatible next heartbeat.
+`applied_locale` is nonempty only when a matching locale sidecar is durable. Admin views
+project applied_revision as zero if language does not match; internal revision
+checks for network handoff retain their original semantics. Firmware without
+`locale` is considered Russian-only, including after downgrade. Native data and
+OTA remain usable even if the desired language is unsupported by that firmware.
+
+Private disk schema v3 migrates v1/v2 by filling missing locales with `ru` in the
+baseline and every profile. The entire candidate is validated before an atomic
+write; all other state and IDs are preserved. A v2 binary cannot read v3 state.
+Before an authorized manual server rollback, export the **current** state using:
+
+```sh
+go run ./cmd/settings-export-v2 /private/settings.json /private/settings-v2.json
+```
+
+The image also includes `/app/settings-export-v2` with the same two arguments.
+The output must not exist; it is created mode0600 and contains credentials. The
+input is never overwritten. Export preserves integer revisions exactly and
+removes only the new locale fields. Switching files/images is a separate
+authorized deployment action; do not restore a stale state over newer edits.
+
+Firmware retains the frozen prefs v2 and network trial v1 binary layouts. A
+separate versioned NVS locale record is scoped by Bridge ID and revision; a
+missing/corrupt/mismatched record safely renders Russian but is not acknowledged.
+The matching network rollback locale uses a separate sidecar as well. A failed
+prefs commit blocks further sync acknowledgment until a successful save/recovery
+or reboot reconciles runtime and durable state. No credential or identity
+namespace is erased by locale migration.

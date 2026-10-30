@@ -49,7 +49,12 @@ func validIDsWithLength(ids []string, max, maxLength int) bool {
 	}
 	return true
 }
+func validLocale(locale string) bool { return locale == "ru" || locale == "en" || locale == "sr-Latn" }
+
 func (v Values) Validate() error {
+	if !validLocale(v.Screen.Locale) {
+		return errors.New("unsupported display locale")
+	}
 	if strings.TrimSpace(v.Screen.Name) == "" || !cleanText(v.Screen.Name, 64) || !cleanText(v.Screen.City, 64) {
 		return errors.New("invalid display name or city")
 	}

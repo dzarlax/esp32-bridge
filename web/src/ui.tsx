@@ -1,5 +1,6 @@
 import React from "react";
 import type { Device, Envelope, Status } from "./types";
+import { useT } from "./i18n";
 
 export type Ask = {
   title: string;
@@ -7,15 +8,15 @@ export type Ask = {
   action: "photo_start" | "restart" | "ota_check" | "ota_install" | "reset";
   danger?: boolean;
 };
-export const tzLabel = (tz: string) => (tz === "Europe/Belgrade" ? "Белград" : tz);
-export const authMethodLabel = (method?: string) =>
+export const tzLabel = (tz: string, t: (message: string) => string) => (tz === "Europe/Belgrade" ? t("Белград") : tz);
+export const authMethodLabel = (method: string | undefined, t: (message: string) => string) =>
   method === "password"
-    ? "Пароль администратора"
+    ? t("Пароль администратора")
     : method === "cloudflare" || method === "cloudflare_access"
       ? "Cloudflare Access"
       : method
-        ? "Другой способ входа"
-        : "Не сообщается";
+        ? t("Другой способ входа")
+        : t("Не сообщается");
 const statusLabels: Record<Status["state"], string> = {
   disabled: "Отключён",
   unconfigured: "Требуется подключение",
@@ -26,21 +27,21 @@ const statusLabels: Record<Status["state"], string> = {
 export const canRun = (device: Envelope["device"], action: string) =>
   device.connected && device.capabilities.includes(action);
 
-export function appliedSettingsStatus(device: Device, desiredRevision: number) {
+export function appliedSettingsStatus(device: Device, desiredRevision: number, t: (message: string) => string) {
   if (!device.last_seen) {
     return device.connected
-      ? { state: "muted" as const, label: "Подтверждение не получено" }
-      : { state: "warn" as const, label: "Ожидает подключения" };
+      ? { state: "muted" as const, label: t("Подтверждение не получено") }
+      : { state: "warn" as const, label: t("Ожидает подключения") };
   }
   if (device.applied_revision === desiredRevision) {
     return {
       state: "good" as const,
-      label: "Настройки подтверждены устройством",
+      label: t("Настройки подтверждены устройством"),
     };
   }
   return device.connected
-    ? { state: "warn" as const, label: "Ожидают применения" }
-    : { state: "muted" as const, label: "Ожидают подключения" };
+    ? { state: "warn" as const, label: t("Ожидают применения") }
+    : { state: "muted" as const, label: t("Ожидают подключения") };
 }
 
 export function Icon({ name, size = 22 }: { name: string; size?: number }) {
@@ -218,24 +219,27 @@ export function Field({
   help?: React.ReactNode;
   className?: string;
 }) {
+  const t = useT();
   const labelId = React.useId();
   return (
     <div className={`field ${className}`}>
       <div id={labelId} className="field-label">
-        {label}
+        {t(label)}
       </div>
       <div className="field-control">
-        {React.Children.map(children, (child) => labelControls(child, label))}
-        {help && <small>{help}</small>}
+        {React.Children.map(children, (child) => labelControls(child, t(label)))}
+        {help && <small>{typeof help === "string" ? t(help) : help}</small>}
       </div>
     </div>
   );
 }
 export function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
-  return <input {...props} />;
+  const t = useT();
+  return <input {...props} placeholder={props.placeholder ? t(props.placeholder) : undefined} aria-label={props["aria-label"] ? t(props["aria-label"]) : undefined} />;
 }
 export function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
-  return <select {...props}>{props.children}</select>;
+  const t = useT();
+  return <select {...props} aria-label={props["aria-label"] ? t(props["aria-label"]) : undefined}>{props.children}</select>;
 }
 export function Toggle({
   label,
@@ -248,9 +252,10 @@ export function Toggle({
   onChange: (value: boolean) => void;
   disabled?: boolean;
 }) {
+  const t = useT();
   return (
     <label className={`toggle ${disabled ? "disabled" : ""}`}>
-      <span>{label}</span>
+      <span>{t(label)}</span>
       <input
         type="checkbox"
         role="switch"
@@ -271,6 +276,7 @@ export function Segmented<T extends string>({
   options: [T, string][];
   onChange: (value: T) => void;
 }) {
+  const t = useT();
   return (
     <div className="segmented" role="group">
       {options.map(([key, label]) => (
@@ -281,7 +287,7 @@ export function Segmented<T extends string>({
           className={value === key ? "selected" : ""}
           onClick={() => onChange(key)}
         >
-          {label}
+          {t(label)}
         </button>
       ))}
     </div>
@@ -308,14 +314,15 @@ export function StatusPill({
   state: "good" | "warn" | "bad" | "muted";
   label: string;
 }) {
+  const t = useT();
   return (
     <span className={`status-pill ${state}`}>
       <i />
-      {label}
+      {t(label)}
     </span>
   );
 }
-export function servicePill(status?: Status): React.ReactNode {
+export function servicePill(status: Status | undefined, t: (message: string) => string): React.ReactNode {
   const state = status?.state ?? "unknown";
   return (
     <StatusPill
@@ -328,7 +335,7 @@ export function servicePill(status?: Status): React.ReactNode {
               ? "warn"
               : "muted"
       }
-      label={statusLabels[state]}
+      label={t(statusLabels[state])}
     />
   );
 }
@@ -347,6 +354,7 @@ export function SecretField({
   onRemove: () => void;
   help?: string;
 }) {
+  const t = useT();
   const markedRemove = value === null;
   return (
     <Field
@@ -379,8 +387,7 @@ export function SecretField({
           disabled={!present || markedRemove}
           onClick={onRemove}
         >
-          Удалить ключ
-        </button>
+          {" "}{t("Удалить ключ")}{" "}</button>
       </div>
     </Field>
   );

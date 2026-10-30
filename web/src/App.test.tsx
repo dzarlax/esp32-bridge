@@ -25,7 +25,7 @@ function settingsEnvelope(deviceId: string, name: string) {
     secrets_present: { health_api_key: false, todoist_token: false, ha_token: false, calendar_platform_token: false, immich_api_key: false },
     device: { connected: true, last_seen: new Date().toISOString(), applied_revision: 2, firmware: "1.0", ip: "192.0.2.10", ssid: "Test", uptime_seconds: 120, time_synced: true, capabilities: ["preferences", "network", "restart"], error: "", command: null },
     statuses: {},
-    capabilities: { brightness: false, google_photos: false, timezones: ["Europe/Belgrade", "UTC"] },
+    capabilities: { brightness: false, google_photos: false, timezones: ["Europe/Belgrade", "UTC"], locales: ["ru", "en", "sr-Latn"] },
   };
 }
 
@@ -54,9 +54,84 @@ function installFetch(devices: { id: string; name: string }[], settings: (id: st
   return fetchMock;
 }
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.localStorage.clear(); });
 
 describe("multi-display shell", () => {
+  it("switches the interface language without losing a draft or validation error", async () => {
+    installFetch([{ id: firstId, name: "Hall" }], async (id) => settingsEnvelope(id, "Hall"));
+    render(<App />);
+    const city = await screen.findByLabelText("Подпись города") as HTMLInputElement;
+    fireEvent.change(city, { target: { value: "Unsubmitted city" } });
+    const idle = screen.getByLabelText("Задержка бездействия");
+    fireEvent.change(idle, { target: { value: "5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения" }));
+    expect(await screen.findAllByText(/Введите целое число от 30/)).toHaveLength(2);
+    fireEvent.change(screen.getByLabelText("Выберите язык интерфейса"), { target: { value: "en" } });
+    expect((await screen.findAllByText("Screen")).length).toBeGreaterThan(0);
+    expect((screen.getByLabelText("City label") as HTMLInputElement).value).toBe("Unsubmitted city");
+    expect((screen.getByLabelText("Idle delay") as HTMLInputElement).value).toBe("5");
+    expect(screen.getByText("Enter a whole number from 30 to 3600 sec.")).toBeTruthy();
+    expect(window.localStorage.getItem("homedash.ui.locale")).toBe("en");
+    expect(document.documentElement.lang).toBe("en");
+    expect(document.title).toBe("HomeDash — Settings");
+  });
+
+  it("keeps the session language switch usable when local storage is blocked", async () => {
+    installFetch([{ id: firstId, name: "Hall" }], async (id) => settingsEnvelope(id, "Hall"));
+    vi.spyOn(window.localStorage, "setItem").mockImplementation(() => { throw new DOMException("Blocked", "SecurityError"); });
+    render(<App />);
+    await screen.findByLabelText("Подпись города");
+    fireEvent.change(screen.getByLabelText("Выберите язык интерфейса"), { target: { value: "sr-Latn" } });
+    expect((await screen.findAllByText("Ekran")).length).toBeGreaterThan(0);
+    expect(document.documentElement.lang).toBe("sr-Latn");
+    expect(document.title).toBe("HomeDash — Podešavanja");
+  });
+
+  it("retranslates a visible login error after switching languages", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.endsWith("/session")) return json({ authenticated: false, password_enabled: true, cloudflare_enabled: false, csrf_token: "csrf" });
+      if (path.endsWith("/login")) return new Response(JSON.stringify({ error: "invalid_password" }), { status: 401, headers: { "Content-Type": "application/json" } });
+      return json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    fireEvent.change(await screen.findByLabelText("Выберите язык интерфейса"), { target: { value: "en" } });
+    fireEvent.change(screen.getByLabelText("Administrator password"), { target: { value: "wrong" } });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(await screen.findByText("Incorrect password. Check it and try again.")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Interface language"), { target: { value: "sr-Latn" } });
+    expect(await screen.findByText("Lozinka nije tačna. Proverite je i pokušajte ponovo.")).toBeTruthy();
+  });
+
+  it("defaults an absent screen language to Russian and disables unsupported device language", async () => {
+    installFetch([{ id: firstId, name: "Hall" }], async (id) => settingsEnvelope(id, "Hall"));
+    render(<App />);
+    const displayLanguage = await screen.findByLabelText("Язык дисплея") as HTMLSelectElement;
+    expect(displayLanguage.value).toBe("ru");
+    expect(displayLanguage.disabled).toBe(true);
+    expect(screen.getByText("Язык дисплея не поддерживается этой прошивкой.")).toBeTruthy();
+  });
+
+  it("saves a device screen language only when firmware reports locale support", async () => {
+    const fetchMock = installFetch([{ id: firstId, name: "Hall" }], async (id) => {
+      const envelope = settingsEnvelope(id, "Hall");
+      envelope.device.capabilities.push("locale");
+      Object.assign(envelope.device, { applied_locale: "sr-Latn" });
+      return envelope;
+    });
+    render(<App />);
+    const displayLanguage = await screen.findByLabelText("Язык дисплея");
+    expect((displayLanguage as HTMLSelectElement).disabled).toBe(false);
+    expect(screen.getAllByRole("option", { name: "Srpski (latinica)" })).toHaveLength(2);
+    expect(screen.getByText("Применённый язык: Srpski (latinica)")).toBeTruthy();
+    fireEvent.change(displayLanguage, { target: { value: "en" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить изменения" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true));
+    const [, init] = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH")!;
+    expect(JSON.parse(String(init?.body)).settings.screen.locale).toBe("en");
+  });
+
   it("explains the separate minimum for photo changes", async () => {
     const fetchMock = installFetch([{ id: firstId, name: "Hall" }], async (id) => settingsEnvelope(id, "Hall"));
     render(<App />);

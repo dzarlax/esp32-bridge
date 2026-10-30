@@ -1,4 +1,5 @@
 export type ScreenSettings = {
+  locale?: "ru" | "en" | "sr-Latn";
   name: string;
   city: string;
   timezone: string;
@@ -96,6 +97,7 @@ export type Device = {
   uptime_seconds: number;
   time_synced: boolean;
   capabilities: string[];
+  applied_locale?: "ru" | "en" | "sr-Latn";
   error: string;
   command: Command | null;
   model?: string;
@@ -127,6 +129,7 @@ export type Envelope = {
     brightness: boolean;
     google_photos: boolean;
     timezones: string[];
+    locales?: ("ru" | "en" | "sr-Latn")[];
   };
 };
 export type Session = {
@@ -204,14 +207,12 @@ export function isCommandFinal(command: Command | null | undefined): boolean {
     )
   );
 }
-export function formatUptime(seconds: number): string {
+export function formatUptime(seconds: number, locale: "ru" | "en" | "sr-Latn" = "ru"): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "—";
   const days = Math.floor(seconds / 86400);
   const hours = Math.floor((seconds % 86400) / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
-  return days
-    ? `${days} д ${hours} ч`
-    : hours
-      ? `${hours} ч ${minutes} мин`
-      : `${minutes} мин`;
+  if (locale === "en") return days ? `${days} d ${hours} hr` : hours ? `${hours} hr ${minutes} min` : `${minutes} min`;
+  if (locale === "sr-Latn") return days ? `${days} d ${hours} č` : hours ? `${hours} č ${minutes} min` : `${minutes} min`;
+  return days ? `${days} д ${hours} ч` : hours ? `${hours} ч ${minutes} мин` : `${minutes} мин`;
 }

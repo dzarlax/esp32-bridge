@@ -16,7 +16,7 @@ import (
 
 func testValues() Values {
 	return Values{
-		Screen: Screen{Name: "HomeDash", City: "Belgrade", Timezone: "Europe/Belgrade", ClockFormat: "24h", IdleAction: "photos", NightStart: "23:00", NightEnd: "07:00", AutoUpdateCheck: true},
+		Screen: Screen{Locale: "ru", Name: "HomeDash", City: "Belgrade", Timezone: "Europe/Belgrade", ClockFormat: "24h", IdleAction: "photos", NightStart: "23:00", NightEnd: "07:00", AutoUpdateCheck: true},
 		Photos: Photos{Source: "none", IdleSeconds: 300, IntervalSeconds: 60, Order: "shuffle", Layout: "adaptive", CropLimitPercent: 10},
 		Services: map[string]Service{
 			"weather":  {Enabled: true, Latitude: 44.82, Longitude: 20.46, Timezone: "Europe/Belgrade"},

@@ -8,6 +8,7 @@ import (
 )
 
 type Screen struct {
+	Locale          string `json:"locale"`
 	Name            string `json:"name"`
 	City            string `json:"city"`
 	Timezone        string `json:"timezone"`
@@ -89,6 +90,7 @@ type Device struct {
 	BridgeID         string     `json:"bridge_id,omitempty"`
 	LastSeen         *time.Time `json:"last_seen"`
 	AppliedRevision  uint64     `json:"applied_revision"`
+	AppliedLocale    string     `json:"applied_locale,omitempty"`
 	Firmware         string     `json:"firmware"`
 	BootID           string     `json:"boot_id"`
 	IP               string     `json:"ip"`
@@ -182,7 +184,7 @@ func Defaults(c *config.Config, baseURL string) Values {
 		source = "none"
 	}
 	return Values{
-		Screen:  Screen{Name: "HomeDash", City: "Belgrade", Timezone: "Europe/Belgrade", ClockFormat: "24h", IdleAction: "photos", NightStart: "23:00", NightEnd: "07:00", AutoUpdateCheck: true},
+		Screen:  Screen{Locale: "ru", Name: "HomeDash", City: "Belgrade", Timezone: "Europe/Belgrade", ClockFormat: "24h", IdleAction: "photos", NightStart: "23:00", NightEnd: "07:00", AutoUpdateCheck: true},
 		Photos:  Photos{Enabled: c.PhotoEnabled, Source: source, BaseURL: c.ImmichBaseURL, AlbumID: c.ImmichAlbumID, IdleSeconds: idle, IntervalSeconds: interval, Order: "shuffle", Layout: "adaptive", CropLimitPercent: 10},
 		Network: Network{BridgeURL: strings.TrimSuffix(baseURL, "/")},
 		Services: map[string]Service{

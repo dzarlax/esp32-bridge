@@ -217,6 +217,14 @@ network settings, status and command queue. The device selector lists actual
 registrations; a new display appears after its first authenticated settings sync.
 Changing shared connections explicitly affects every display using that service.
 
+The web panel supports Russian, English and Serbian Latin. Its language selector
+is independent of the per-display language in Screen settings. Browser choice is
+saved locally, defaulting to Russian; device language is synchronized and saved
+by each capable firmware. User-created names, events, albums and service content
+are preserved. Firmware without the `locale` capability cannot change its language.
+The v3 state migration and private, non-overwriting rollback export are documented
+in [settings-contract.md](docs/settings-contract.md#localization-and-persistent-compatibility).
+
 Managed firmware generates a stable `device_id` in a separate NVS namespace and
 sends `X-Device-ID` on all native API requests. The identity survives preferences
 reset, reboot and network changes. Unknown identities must sync before reading

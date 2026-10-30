@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import type { ReactNode } from "react";
 import { formatUptime, type Command } from "./types";
 import type { PageProps } from "./page-types";
 import { errorMessage } from "./error-messages";
@@ -12,6 +13,7 @@ import {
   Toggle,
   type Ask,
 } from "./ui";
+import { dateLocale, useLocale, useT } from "./i18n";
 
 const capabilityLabels: Record<string, string> = {
   preferences: "Настройки",
@@ -32,32 +34,34 @@ export function UpdatesPage({
   ask,
   busy,
 }: PageProps) {
+  const t = useT();
+  const { locale } = useLocale();
   const currentVersion =
     updates?.current_version || envelope.device.firmware || "";
   const available = updates?.available_version || "";
   return (
     <div className="content-narrow">
       <section className="settings-section">
-        <SectionHeading>Установленная версия</SectionHeading>
+        <SectionHeading>{t("Установленная версия")}</SectionHeading>
         <div className="version-card">
           <div>
-            <small>Текущая версия</small>
+            <small>{t("Текущая версия")}</small>
             <strong className="version-value">
-              {currentVersion || "Не сообщается"}
+              {currentVersion || t("Не сообщается")}
             </strong>
             {currentVersion && (
               <StatusPill
                 state={available && updates?.update_available ? "warn" : "good"}
                 label={
                   available && updates?.update_available
-                    ? "Доступно обновление"
-                    : "Версия установлена"
+              ? t("Доступно обновление")
+              : t("Версия установлена")
                 }
               />
             )}
           </div>
           <div>
-            <small>Дисплей</small>
+            <small>{t("Дисплей")}</small>
             <strong>{draft.screen.name || "HomeDash"}</strong>
           </div>
           <button
@@ -74,12 +78,11 @@ export function UpdatesPage({
               })
             }
           >
-            <Icon name="refresh" size={18} /> Проверить обновления
-          </button>
+            <Icon name="refresh" size={18} /> {" "}{t("Проверить обновления")}{" "}</button>
         </div>
         {available && updates?.update_available && (
           <div className="update-available">
-            <span>Доступна версия</span>
+            <span>{t("Доступна версия")}</span>
             <strong>{available}</strong>
             <button
               className="button primary"
@@ -96,20 +99,19 @@ export function UpdatesPage({
                 })
               }
             >
-              Установить…
-            </button>
+              {" "}{t("Установить…")}{" "}</button>
           </div>
         )}
       </section>
       <section className="settings-section">
-        <SectionHeading>Автоматические действия</SectionHeading>
+        <SectionHeading>{t("Автоматические действия")}</SectionHeading>
         <div className="preference-row">
           <div>
-            <strong>Проверять новые версии</strong>
-            <small>Фоновая проверка доступности обновлений.</small>
+            <strong>{t("Проверять новые версии")}</strong>
+            <small>{t("Фоновая проверка доступности обновлений.")}</small>
           </div>
           <Toggle
-            label="Автоматически проверять обновления"
+            label={t("Автоматически проверять обновления")}
             checked={draft.screen.auto_update_check}
             onChange={(value) =>
               edit({
@@ -121,8 +123,8 @@ export function UpdatesPage({
         </div>
         <div className="preference-row">
           <div>
-            <strong>Установка обновлений</strong>
-            <small>Выберите, спрашивать ли перед установкой.</small>
+            <strong>{t("Установка обновлений")}</strong>
+            <small>{t("Выберите, спрашивать ли перед установкой.")}</small>
           </div>
           <Segmented
             value={draft.screen.auto_install ? "auto" : "confirm"}
@@ -140,21 +142,19 @@ export function UpdatesPage({
         </div>
       </section>
       <section className="settings-section">
-        <SectionHeading>Состояние команды</SectionHeading>
+        <SectionHeading>{t("Состояние команды")}</SectionHeading>
         {command ? (
           <CommandCard command={command} />
         ) : (
-          <p className="muted">Нет активных или последних команд.</p>
+          <p className="muted">{t("Нет активных или последних команд.")}</p>
         )}
         {pendingCommand && (
           <small>
-            Ожидание ответа дисплея. Новая команда будет доступна после
-            завершения текущей.
-          </small>
+            {" "}{t("Ожидание ответа дисплея. Новая команда будет доступна после завершения текущей.")}{" "}</small>
         )}
       </section>
       <section className="settings-section">
-        <SectionHeading>История устройства</SectionHeading>
+        <SectionHeading>{t("История устройства")}</SectionHeading>
         {updates?.history?.length ? (
           <div className="history-list">
             {updates.history.map((item, index) => (
@@ -173,21 +173,20 @@ export function UpdatesPage({
                   }
                   label={item.state}
                 />
-                {item.at && <time>{new Date(item.at).toLocaleString()}</time>}
+                {item.at && <time>{new Date(item.at).toLocaleString(dateLocale(locale))}</time>}
               </div>
             ))}
           </div>
         ) : (
           <p className="muted">
-            История обновлений пока не сообщается устройством.
-          </p>
+            {" "}{t("История обновлений пока не сообщается устройством.")}{" "}</p>
         )}
       </section>
       {pendingCommand &&
         envelope.device.ota_progress !== undefined &&
         Number.isFinite(envelope.device.ota_progress) && (
           <section className="settings-section">
-            <SectionHeading>Выполнение команды</SectionHeading>
+            <SectionHeading>{t("Выполнение команды")}</SectionHeading>
             <progress
               max={100}
               value={Math.min(100, Math.max(0, envelope.device.ota_progress))}
@@ -201,6 +200,8 @@ export function UpdatesPage({
   );
 }
 function CommandCard({ command }: { command: Command }) {
+  const t = useT();
+  const { locale } = useLocale();
   const state =
     command.state === "succeeded"
       ? "good"
@@ -227,14 +228,14 @@ function CommandCard({ command }: { command: Command }) {
   return (
     <div className="command-card">
       <div>
-        <strong>{actionLabel[command.action] ?? "Команда устройства"}</strong>
+        <strong>{t(actionLabel[command.action] ?? "Команда устройства")}</strong>
         <StatusPill
           state={state}
           label={stateLabel[command.state] ?? "Статус неизвестен"}
         />
       </div>
-      <small>Создана {new Date(command.created_at).toLocaleString()}</small>
-      {command.error && <p className="error-text">{errorMessage(command.error, "Дисплей не смог выполнить команду. Повторите попытку после подключения устройства.")}</p>}
+      <small>{t("Создана")}{" "}{new Date(command.created_at).toLocaleString(dateLocale(locale))}</small>
+      {command.error && <p className="error-text">{t(errorMessage(command.error, "Дисплей не смог выполнить команду. Повторите попытку после подключения устройства."))}</p>}
     </div>
   );
 }
@@ -248,8 +249,20 @@ export function DevicePage({
   downloadDiagnostics,
   refreshStatus,
 }: PageProps) {
+  const t = useT();
+  const { locale } = useLocale();
   const d = envelope.device;
-  const settingsStatus = appliedSettingsStatus(d, envelope.revision);
+  const settingsStatus = appliedSettingsStatus(d, envelope.revision, t);
+  const facts: Array<[string, ReactNode]> = [
+    ["Прошивка", d.firmware || t("Не сообщается")],
+    ["Bridge", d.connected ? t("На связи") : t("Не в сети")],
+    ["Wi-Fi", d.ssid ? <>{t("Подключён · ")}{d.ssid}</> : t("Не сообщается")],
+    ["IP-адрес", d.ip || t("Не сообщается")],
+    ["Синхронизация времени", d.time_synced ? t("Выполнена") : t("Не подтверждена")],
+    ["Последний ответ", d.last_seen ? new Date(d.last_seen).toLocaleString(dateLocale(locale)) : t("Не сообщается")],
+    ["Время работы", d.last_seen ? formatUptime(d.uptime_seconds, locale) : t("Не сообщается")],
+    ["Настройки", settingsStatus.label],
+  ];
   return (
     <div className="content-narrow">
       <section className="settings-section device-summary">
@@ -258,38 +271,18 @@ export function DevicePage({
         </div>
         <div>
           <h2>{envelope.settings.screen.name || "HomeDash"}</h2>
-          <p>{d.model || "Модель не сообщается"}</p>
+          <p>{d.model || t("Модель не сообщается")}</p>
           <small>
             {d.width && d.height
               ? `${d.width} × ${d.height}`
-              : "Разрешение не сообщается"}
+              : t("Разрешение не сообщается")}
           </small>
         </div>
       </section>
       <section className="settings-section device-facts">
-        {[
-          ["Прошивка", d.firmware || "Не сообщается"],
-          ["Bridge", d.connected ? "На связи" : "Не в сети"],
-          ["Wi-Fi", d.ssid ? `Подключён · ${d.ssid}` : "Не сообщается"],
-          ["IP-адрес", d.ip || "Не сообщается"],
-          [
-            "Синхронизация времени",
-            d.time_synced ? "Выполнена" : "Не подтверждена",
-          ],
-          [
-            "Последний ответ",
-            d.last_seen
-              ? new Date(d.last_seen).toLocaleString()
-              : "Не сообщается",
-          ],
-          [
-            "Время работы",
-            d.last_seen ? formatUptime(d.uptime_seconds) : "Не сообщается",
-          ],
-          ["Настройки", settingsStatus.label],
-        ].map(([label, value]) => (
+        {facts.map(([label, value]) => (
           <div key={label}>
-            <span>{label}</span>
+            <span>{t(label)}</span>
             <strong>{value}</strong>
           </div>
         ))}
@@ -298,35 +291,32 @@ export function DevicePage({
         <SectionHeading
           detail={
             d.connected ? (
-              <StatusPill state="good" label="Подключён" />
+              <StatusPill state="good" label={t("Подключён")} />
             ) : (
-              <StatusPill state="warn" label="Не в сети" />
+              <StatusPill state="warn" label={t("Не в сети")} />
             )
           }
         >
-          Диагностика
-        </SectionHeading>
-        <p>Отчёт очищен от паролей, токенов и содержимого фотографий.</p>
+          {" "}{t("Диагностика")}{" "}</SectionHeading>
+        <p>{t("Отчёт очищен от паролей, токенов и содержимого фотографий.")}</p>
         <div className="button-row">
           <button
             className="button primary"
             disabled={busy}
             onClick={() => downloadDiagnostics()}
           >
-            <Icon name="download" size={18} /> Скачать диагностику
-          </button>
+            <Icon name="download" size={18} /> {" "}{t("Скачать диагностику")}{" "}</button>
           <button
             className="button secondary"
             disabled={busy}
             onClick={() => refreshStatus()}
           >
-            <Icon name="refresh" size={18} /> Обновить статус
-          </button>
+            <Icon name="refresh" size={18} /> {" "}{t("Обновить статус")}{" "}</button>
         </div>
-        {d.error && <div className="alert error">{d.error}</div>}
+        {d.error && <div className="alert error">{t(errorMessage(d.error, "Не удалось выполнить действие. Проверьте введённые данные и повторите попытку."))}</div>}
       </section>
       <section className="settings-section">
-        <SectionHeading>Действия с устройством</SectionHeading>
+        <SectionHeading>{t("Действия с устройством")}</SectionHeading>
         <div className="device-actions">
           <button
             className="button secondary"
@@ -340,15 +330,11 @@ export function DevicePage({
               })
             }
           >
-            <Icon name="restart" size={18} /> Перезапустить дисплей
-          </button>
+            <Icon name="restart" size={18} /> {" "}{t("Перезапустить дисплей")}{" "}</button>
           <div className="danger-zone">
-            <h3>Сброс настроек дисплея</h3>
+            <h3>{t("Сброс настроек дисплея")}</h3>
             <p>
-              Устройство удалит параметры Wi-Fi, адрес Bridge и локальные
-              настройки дисплея. Настройки панели и сервисов на сервере
-              сохранятся.
-            </p>
+              {" "}{t("Устройство удалит параметры Wi-Fi, адрес Bridge и локальные настройки дисплея. Настройки панели и сервисов на сервере сохранятся.")}{" "}</p>
             <button
               className="button danger-outline"
               disabled={!canRun(d, "reset") || busy || pendingCommand}
@@ -362,26 +348,25 @@ export function DevicePage({
                 })
               }
             >
-              <Icon name="trash" size={18} /> Сбросить настройки дисплея…
-            </button>
+              <Icon name="trash" size={18} /> {" "}{t("Сбросить настройки дисплея…")}{" "}</button>
           </div>
         </div>
         {pendingCommand && command && <CommandCard command={command} />}
       </section>
       <section className="settings-section">
-        <SectionHeading>Возможности устройства</SectionHeading>
+        <SectionHeading>{t("Возможности устройства")}</SectionHeading>
         {d.capabilities.some((item) => capabilityLabels[item]) ? (
           <div className="capability-list">
             {d.capabilities
               .filter((item) => capabilityLabels[item])
               .map((item) => (
                 <span key={item} className="badge">
-                  {capabilityLabels[item]}
+                  {t(capabilityLabels[item])}
                 </span>
               ))}
           </div>
         ) : (
-          <p className="muted">Нет сведений о возможностях устройства.</p>
+          <p className="muted">{t("Нет сведений о возможностях устройства.")}</p>
         )}
       </section>
     </div>
@@ -399,6 +384,7 @@ export function ConfirmDialog({
   onClose: () => void;
   onConfirm: () => void;
 }) {
+  const t = useT();
   const confirmRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -439,22 +425,21 @@ export function ConfirmDialog({
         aria-labelledby="confirm-title"
         aria-describedby="confirm-description"
       >
-        <button className="dialog-close" aria-label="Закрыть" onClick={onClose}>
+        <button className="dialog-close" aria-label={t("Закрыть")} onClick={onClose}>
           <Icon name="close" size={19} />
         </button>
         <div className={`dialog-icon ${ask.danger ? "danger" : ""}`}>
           <Icon name={ask.danger ? "trash" : "restart"} size={22} />
         </div>
-        <h2 id="confirm-title">{ask.title}</h2>
-        <p id="confirm-description">{ask.description}</p>
+        <h2 id="confirm-title">{t(ask.title)}</h2>
+        <p id="confirm-description">{t(ask.description)}</p>
         <div className="button-row">
           <button
             className="button secondary"
             onClick={onClose}
             disabled={busy}
           >
-            Отмена
-          </button>
+            {" "}{t("Отмена")}{" "}</button>
           <button
             ref={confirmRef}
             className={`button ${ask.danger ? "danger" : "primary"}`}
@@ -462,12 +447,12 @@ export function ConfirmDialog({
             onClick={onConfirm}
           >
             {busy
-              ? "Отправка…"
+              ? t("Отправка…")
               : ask.action === "ota_install"
-                ? "Установить"
+                ? t("Установить")
                 : ask.action === "reset"
-                  ? "Сбросить"
-                  : "Подтвердить"}
+                  ? t("Сбросить")
+                  : t("Подтвердить")}
           </button>
         </div>
       </section>

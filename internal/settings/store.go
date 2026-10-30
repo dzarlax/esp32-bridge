@@ -89,6 +89,9 @@ func New(dir string, defaults Values, secrets map[string]string, baseURL string,
 	if err != nil || !dirInfo.IsDir() || dirInfo.Mode().Perm()&0077 != 0 || dirInfo.Mode().Perm()&0700 != 0700 {
 		return nil, errors.New("settings state directory must be private")
 	}
+	if defaults.Screen.Locale == "" {
+		defaults.Screen.Locale = "ru"
+	}
 	if err := defaults.Validate(); err != nil {
 		return nil, errors.New("invalid baseline settings")
 	}
@@ -108,7 +111,7 @@ func New(dir string, defaults Values, secrets map[string]string, baseURL string,
 			return nil, errors.New("cannot create Bridge identity")
 		}
 		s.state = diskState{
-			Version: 2, BridgeID: id, Sequence: 1, SharedRevision: 1,
+			Version: 3, BridgeID: id, Sequence: 1, SharedRevision: 1,
 			Connections: connectionsFromValues(defaults), Baseline: clone(defaults),
 			SecretOverrides: map[string]string{}, Profiles: map[string]profileState{},
 		}
@@ -149,6 +152,9 @@ func New(dir string, defaults Values, secrets map[string]string, baseURL string,
 		if err != nil || legacy.Revision == 0 {
 			return nil, errors.New("invalid legacy settings state")
 		}
+		if legacy.Settings.Screen.Locale == "" {
+			legacy.Settings.Screen.Locale = "ru"
+		}
 		if err := legacy.Settings.Validate(); err != nil {
 			return nil, errors.New("invalid legacy settings state")
 		}
@@ -166,7 +172,7 @@ func New(dir string, defaults Values, secrets map[string]string, baseURL string,
 			return nil, errors.New("invalid stored Bridge identity")
 		}
 		s.state = diskState{
-			Version: 2, BridgeID: bridgeID, Sequence: legacy.Revision, SharedRevision: 1,
+			Version: 3, BridgeID: bridgeID, Sequence: legacy.Revision, SharedRevision: 1,
 			Connections: connectionsFromValues(legacy.Settings), Baseline: withConnections(clone(legacy.Settings), connectionsFromValues(legacy.Settings)),
 			SecretOverrides: clone(legacy.Secrets), Profiles: map[string]profileState{},
 			LegacyUnaddressed: &archivedPending{Network: clone(legacy.Network), Command: clone(legacy.Command)},
@@ -177,13 +183,22 @@ func New(dir string, defaults Values, secrets map[string]string, baseURL string,
 		if s.state.SecretOverrides == nil {
 			s.state.SecretOverrides = map[string]string{}
 		}
-		if err := s.persist(s.state); err != nil {
-			return nil, err
-		}
-	case 2:
+	case 2, 3:
 		state, err := decodeStrict[diskState](data)
 		if err != nil {
 			return nil, errors.New("invalid settings state")
+		}
+		if version.Version == 2 {
+			state.Version = 3
+			if state.Baseline.Screen.Locale == "" {
+				state.Baseline.Screen.Locale = "ru"
+			}
+			for id, p := range state.Profiles {
+				if p.Settings.Screen.Locale == "" {
+					p.Settings.Screen.Locale = "ru"
+				}
+				state.Profiles[id] = p
+			}
 		}
 		s.state = state
 	default:
@@ -191,6 +206,11 @@ func New(dir string, defaults Values, secrets map[string]string, baseURL string,
 	}
 	if err := s.validateState(s.state); err != nil {
 		return nil, err
+	}
+	if version.Version != 3 {
+		if err := s.persist(s.state); err != nil {
+			return nil, err
+		}
 	}
 	return s, nil
 }
@@ -223,7 +243,7 @@ func (s *Store) BridgeID() string {
 }
 
 func (s *Store) validateState(st diskState) error {
-	if st.Version != 2 || !validBridgeID(st.BridgeID) || st.Sequence == 0 || st.SharedRevision == 0 || st.Profiles == nil || st.SecretOverrides == nil || len(st.Profiles) > MaxDevices {
+	if st.Version != 3 || !validBridgeID(st.BridgeID) || st.Sequence == 0 || st.SharedRevision == 0 || st.Profiles == nil || st.SecretOverrides == nil || len(st.Profiles) > MaxDevices {
 		return errors.New("invalid settings state")
 	}
 	if err := validateConnections(st.Connections); err != nil {
@@ -407,8 +427,15 @@ func (s *Store) Update(id string, revision uint64, p Patch) error {
 	if profile.Revision != revision {
 		return ErrConflict
 	}
+	// Older clients omit the field; preserve the current device language.
+	if p.Settings.Screen.Locale == "" {
+		p.Settings.Screen.Locale = profile.Settings.Screen.Locale
+	}
 	if err := p.Settings.Validate(); err != nil {
 		return err
+	}
+	if p.Settings.Screen.Locale != profile.Settings.Screen.Locale && !slices.Contains(s.devices[id].Capabilities, "locale") {
+		return ErrUnavailable
 	}
 	if !sameSharedURLs(p.Settings, s.state.Connections) {
 		return ErrSharedURLMismatch
@@ -506,6 +533,7 @@ func (s *Store) Devices() DevicesList {
 		profile := s.state.Profiles[id]
 		device := clone(s.devices[id])
 		device.Connected = s.online(device)
+		device.AppliedRevision = appliedRevision(device, profile)
 		result.Devices = append(result.Devices, DeviceSummary{
 			ID: id, Name: profile.Settings.Screen.Name, Connected: device.Connected,
 			LastSeen: clone(device.LastSeen), AppliedRevision: device.AppliedRevision,
@@ -513,6 +541,19 @@ func (s *Store) Devices() DevicesList {
 		})
 	}
 	return result
+}
+
+// Legacy firmware only renders Russian. Never project a matching revision as
+// applied when the reported renderer does not match the desired language.
+func appliedRevision(d Device, p profileState) uint64 {
+	matches := d.AppliedLocale == p.Settings.Screen.Locale && slices.Contains(d.Capabilities, "locale")
+	if !slices.Contains(d.Capabilities, "locale") {
+		matches = p.Settings.Screen.Locale == "ru"
+	}
+	if !matches {
+		return 0
+	}
+	return d.AppliedRevision
 }
 
 func (s *Store) HasDevice(id string) bool {
@@ -534,6 +575,7 @@ func (s *Store) View(id string, statuses map[string]Status) (Envelope, error) {
 	device.DeviceID = ""
 	device.BridgeID = ""
 	device.Connected = s.online(device)
+	device.AppliedRevision = appliedRevision(device, profile)
 	if device.Capabilities == nil {
 		device.Capabilities = []string{}
 	}
@@ -545,7 +587,7 @@ func (s *Store) View(id string, statuses map[string]Status) (Envelope, error) {
 		DeviceID: id, Revision: profile.Revision, Settings: settings,
 		SecretsPresent: secretPresence(s.effectiveSecrets(s.state)),
 		Device:         DeviceView{Device: device, Command: clone(profile.Command)},
-		Statuses:       clone(statuses), Capabilities: map[string]any{"brightness": false, "google_photos": false, "timezones": []string{"Europe/Belgrade", "UTC"}},
+		Statuses:       clone(statuses), Capabilities: map[string]any{"brightness": false, "google_photos": false, "locales": []string{"ru", "en", "sr-Latn"}, "timezones": []string{"Europe/Belgrade", "UTC"}},
 	}, nil
 }
 
@@ -699,6 +741,9 @@ func disableRemovedSelections(st *diskState, removed disconnectSet) {
 }
 
 func (s *Store) Sync(d Device) (SyncResponse, error) {
+	if d.AppliedLocale != "" && !validLocale(d.AppliedLocale) {
+		return SyncResponse{}, errors.New("invalid applied locale")
+	}
 	if !validBridgeID(d.DeviceID) || d.Firmware == "" || d.BootID == "" || len(d.Firmware) > 32 || len(d.BootID) > 64 || len(d.BridgeID) > 32 || len(d.SSID) > 32 || len(d.IP) > 64 || len(d.Capabilities) > 16 || len(d.Model) > 80 || len(d.AvailableVersion) > 32 || d.Width < 0 || d.Width > 10000 || d.Height < 0 || d.Height > 10000 || d.OTAProgress < 0 || d.OTAProgress > 100 {
 		return SyncResponse{}, errors.New("invalid device report")
 	}

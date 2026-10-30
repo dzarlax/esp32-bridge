@@ -13,11 +13,13 @@ COPY . .
 COPY --from=web-builder /web/dist ./web/dist
 RUN CGO_ENABLED=0 go build -tags webassets -ldflags="-w -s" -o /app/server ./cmd/server
 RUN CGO_ENABLED=0 go build -ldflags="-w -s" -o /app/admin-password ./cmd/admin-password
+RUN CGO_ENABLED=0 go build -ldflags="-w -s" -o /app/settings-export-v2 ./cmd/settings-export-v2
 
 FROM alpine:latest
 RUN apk add --no-cache ca-certificates
 WORKDIR /app
 COPY --from=builder /app/server .
 COPY --from=builder /app/admin-password .
+COPY --from=builder /app/settings-export-v2 .
 EXPOSE 8090
 CMD ["/app/server"]
