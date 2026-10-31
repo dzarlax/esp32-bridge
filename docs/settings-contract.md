@@ -19,7 +19,7 @@ no commit, push, deployment or flash is authorized yet. This extends the deploye
   Body device_id on sync must equal the header. Unknown IDs register only through
   authenticated sync; default cap 8 devices. Reject overflow without changing state.
   Never fall back an unknown managed ID to another display's data.
-- Headerless legacy device reads continue using the existing default config/feed.
+- Device reads without X-Device-ID continue using the existing default config/feed; X-API-Key remains required.
   When admin management is disabled, keep legacy API behavior (ignore optional ID).
 
 ## Admin session (unchanged)
@@ -132,8 +132,8 @@ require the native API key in X-API-Key (never a query-string key for bootstrap)
 These reads never create a profile or apply settings;
 dashboard, calendar, home actions and photos remain unavailable until sync.
 Malformed identities remain rejected. Registered devices retain their runtime.
-Photo frames advertised to A must not be borrowed from B's collection. Headerless
-legacy requests keep the legacy default. Raw RGB565 payload protocol stays unchanged.
+Photo frames advertised to A must not be borrowed from B's collection. Requests without X-Device-ID
+keep the legacy default; X-API-Key is still required. Raw RGB565 payload protocol stays unchanged.
 Photo preparation is bounded globally; cap default managed devices8 and use16
 cached frames per managed profile, with one decoding/render job at a time. Shared
 upstream connection/data caches should reuse identical source configurations.
@@ -228,3 +228,30 @@ the optional target applies to climate only. Unavailable, unknown and invalid
 states produce `available:false`; a malformed response or mismatched entity
 returns a safe error. Neither legacy snapshots nor unavailable states are proof
 of an action. Older Bridges may return 404 for this read-only endpoint.
+
+## Header-only native authentication and terminal OTA
+
+Every native handler, including device sync/probe and OTA bootstrap, requires one
+matching nonempty `X-API-Key`. Query-only authentication is rejected with 401.
+With a valid header, any `key` query parameter returns 400
+`query_key_not_supported`; malformed queries return 400 `invalid_query`.
+Administrative session/Cloudflare/CSRF authentication and public health checks
+are unchanged. Non-secret `device_id` URL selection remains supported.
+
+`ota_target` is recorded only after image write. Awaiting reboot is `rebooting`;
+a terminal command clears the target atomically with its result. Success has no
+active stage. Failed/unknown history may retain its last known stage but cannot
+supply live progress when there is no matching pending OTA command.
+
+## Cached calendar diagnostics
+
+Per-device calendar status uses the saved calendar selection and adds source
+`last_success_at: string|null`, `next_sync_at: string|null` (RFC3339 UTC),
+`coverage_complete: boolean|null`, optional `error_code`, and `reasons: string[]`.
+Missing metadata means unknown, preserving older upstream compatibility. Coverage
+is known only with a successful bounded cached projection. Safe errors are
+transient, rate_limited, auth, permission, unsupported, protocol. No event content
+or provider error text is included. These GETs do not trigger provider sync.
+Explicitly bad coverage/errors and stale/non-ready/missing selected sources
+prevent a complete result. Partial photo cards use only eligible selected fresh
+sources; no eligible event clears the old card.

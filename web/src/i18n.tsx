@@ -5,6 +5,18 @@ export const UI_LOCALES: readonly UILocale[] = ["ru", "en", "sr-Latn"];
 const storageKey = "homedash.ui.locale";
 
 const enCatalog = {
+  "Последний известный этап": "Last known stage",
+  "Покрытие запрошенного периода неполное": "The requested period is not fully covered",
+  "Последнее обновление": "Last successful sync",
+  "Следующая синхронизация": "Next sync attempt",
+  "Время синхронизации неизвестно": "Sync time is unknown",
+  "Возможен сдвиг часов": "Possible clock difference",
+  "Требуется проверка авторизации календаря": "Calendar authentication needs attention",
+  "Нет прав на чтение календаря": "Calendar read access is denied",
+  "Сервис ограничивает частоту запросов": "The service is limiting requests",
+  "Временная ошибка синхронизации": "Temporary sync error",
+  "Источник не поддерживает синхронизацию": "The source does not support sync",
+  "Ошибка ответа календарного сервиса": "Calendar service response error",
  "Данные источника неполные": "Source data is incomplete",
  "Источник сообщил об ошибке": "Source reported an error",
   "Расписание полное": "Schedule complete",
@@ -516,6 +528,18 @@ const enCatalog = {
 type MessageKey = keyof typeof enCatalog;
 
 const srCatalog = {
+  "Последний известный этап": "Poslednja poznata faza",
+  "Покрытие запрошенного периода неполное": "Traženi period nije potpuno pokriven",
+  "Последнее обновление": "Poslednja uspešna sinhronizacija",
+  "Следующая синхронизация": "Sledeći pokušaj sinhronizacije",
+  "Время синхронизации неизвестно": "Vreme sinhronizacije nije poznato",
+  "Возможен сдвиг часов": "Moguća razlika u vremenu",
+  "Требуется проверка авторизации календаря": "Potrebno je proveriti prijavu za kalendar",
+  "Нет прав на чтение календаря": "Nema dozvole za čitanje kalendara",
+  "Сервис ограничивает частоту запросов": "Servis ograničava učestalost zahteva",
+  "Временная ошибка синхронизации": "Privremena greška sinhronizacije",
+  "Источник не поддерживает синхронизацию": "Izvor ne podržava sinhronizaciju",
+  "Ошибка ответа календарного сервиса": "Greška u odgovoru servisa kalendara",
  "Данные источника неполные": "Podaci izvora nisu potpuni",
  "Источник сообщил об ошибке": "Izvor je prijavio grešku",
   "Расписание полное": "Raspored je potpun",

@@ -886,6 +886,9 @@ func (s *Store) Sync(d Device) (SyncResponse, error) {
 		for i := range profile.OTAHistory {
 			h := &profile.OTAHistory[i]
 			prior := *h
+			if h.State == "succeeded" {
+				h.Stage = ""
+			}
 			if profile.Command != nil && profile.Command.ID == h.ID {
 				switch profile.Command.State {
 				case "accepted":
@@ -925,10 +928,31 @@ func (s *Store) Sync(d Device) (SyncResponse, error) {
 					h.Error = d.OTAError
 				}
 			}
+			if h.State == "succeeded" {
+				h.Stage = ""
+			}
 			if *h != prior {
 				h.UpdatedAt = &now
 				changed = true
 			}
+		}
+		for _, h := range profile.OTAHistory {
+			if d.OTAAttemptID != h.ID {
+				continue
+			}
+			pending := profile.Command != nil && profile.Command.ID == h.ID &&
+				(profile.Command.State == "queued" || profile.Command.State == "accepted")
+			switch h.State {
+			case "succeeded":
+				// Delayed legacy telemetry must not make a completed attempt look active.
+				d.OTAStage, d.OTAError, d.OTAProgress = "", "", 0
+			case "failed", "unknown":
+				if !pending {
+					// Retain the history stage, but don't present it as current device progress.
+					d.OTAStage, d.OTAProgress = "", 0
+				}
+			}
+			break
 		}
 	}
 	if scopeMatches && d.AppliedRevision == profile.Revision && slices.Contains(d.Capabilities, "network") && len(profile.Network) > 0 {
@@ -1069,6 +1093,24 @@ func (s *Store) OTAHistory(id string) ([]OTAAttempt, error) {
 	p, ok := s.state.Profiles[id]
 	if !ok {
 		return nil, ErrDeviceNotFound
+	}
+	// Normalize a private copy so persistence failures cannot mutate live state through
+	// the history slice's shared backing array.
+	p = clone(p)
+	clearedTerminalStage := false
+	for i := range p.OTAHistory {
+		if p.OTAHistory[i].State == "succeeded" && p.OTAHistory[i].Stage != "" {
+			p.OTAHistory[i].Stage = ""
+			clearedTerminalStage = true
+		}
+	}
+	if clearedTerminalStage {
+		next := clone(s.state)
+		next.Profiles[id] = p
+		if err := s.persist(next); err != nil {
+			return nil, err
+		}
+		s.state = next
 	}
 	if c := p.Command; c != nil && c.Action == "ota_install" && (c.State == "queued" || c.State == "accepted") && time.Now().After(c.ExpiresAt) {
 		next := clone(s.state)

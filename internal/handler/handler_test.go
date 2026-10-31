@@ -106,7 +106,7 @@ func TestCalendarUsesCalendarPlatformWithStableIndices(t *testing.T) {
 			t.Fatalf("calendar_id = %#v", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"complete":true,"items":[
+		_, _ = w.Write([]byte(`{"complete":true,"sources":[{"calendar_id":"google:personal","status":"ready","stale":false},{"calendar_id":"apple:family","status":"ready","stale":false}],"items":[
 			{"calendar_id":"apple:family","title":"Late","start":{"date_time":"2026-09-02T09:30:00+02:00"},"end":{"date_time":"2026-09-02T10:00:00+02:00"}},
 			{"calendar_id":"google:personal","title":"All day","start":{"date":"2026-09-02"},"end":{"date":"2026-09-03"}},
 			{"calendar_id":"google:personal","title":"Overnight","start":{"date_time":"2026-09-01T22:00:00+02:00"},"end":{"date_time":"2026-09-02T02:30:00+02:00"}},

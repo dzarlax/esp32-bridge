@@ -66,3 +66,26 @@ func TestCalendarReasonDistinguishesCacheAgeWithoutHidingPartial(t *testing.T) {
 		})
 	}
 }
+
+func TestCalendarStatusPreservesCoverageAndStaleReasonsSafely(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `{"complete":false,"sources":[{"calendar_id":"google:one","status":"ready","stale":true,"last_success_at":"2026-10-30T10:00:00+02:00","next_sync_at":"invalid","coverage_complete":false,"error_code":"https://secret.test/token"}],"items":[]}`)
+	}))
+	defer upstream.Close()
+	h := New(nil, "key", "", "", nil, nil, upstream.Client())
+	h.SetCalendarPlatform(upstream.URL, "fixture-token", []string{"google:one"}, "UTC")
+	details, err := h.CalendarStatus(context.Background())
+	if err != nil || len(details.Sources) != 1 {
+		t.Fatalf("details=%+v err=%v", details, err)
+	}
+	source := details.Sources[0]
+	if source.LastSuccessAt == nil || *source.LastSuccessAt != "2026-10-30T08:00:00Z" || source.NextSyncAt != nil {
+		t.Fatalf("timestamps were not safely projected: %+v", source)
+	}
+	if source.CoverageComplete == nil || *source.CoverageComplete || source.ErrorCode != "" {
+		t.Fatalf("coverage or error sanitization failed: %+v", source)
+	}
+	if source.Reason != "cache_stale" || len(source.Reasons) != 2 || source.Reasons[0] != "cache_stale" || source.Reasons[1] != "coverage_incomplete" {
+		t.Fatalf("simultaneous reasons lost: %+v", source)
+	}
+}

@@ -4,8 +4,43 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
+
+func safeCalendarTimestamp(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(*value))
+	if err != nil {
+		return nil
+	}
+	formatted := parsed.UTC().Format(time.RFC3339)
+	return &formatted
+}
+
+func safeCalendarErrorCode(code string) string {
+	switch code {
+	case "transient", "rate_limited", "auth", "permission", "unsupported", "protocol":
+		return code
+	default:
+		return ""
+	}
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
 
 // CalendarDetails describes only requested sources, never event content.
 type CalendarDetails struct {
@@ -15,10 +50,15 @@ type CalendarDetails struct {
 	Sources  []CalendarSource `json:"sources"`
 }
 type CalendarSource struct {
-	ID     string `json:"id"`
-	State  string `json:"state"`
-	Stale  *bool  `json:"stale,omitempty"`
-	Reason string `json:"reason"`
+	ID               string   `json:"id"`
+	State            string   `json:"state"`
+	Stale            *bool    `json:"stale,omitempty"`
+	LastSuccessAt    *string  `json:"last_success_at,omitempty"`
+	NextSyncAt       *string  `json:"next_sync_at,omitempty"`
+	CoverageComplete *bool    `json:"coverage_complete,omitempty"`
+	ErrorCode        string   `json:"error_code,omitempty"`
+	Reason           string   `json:"reason"`
+	Reasons          []string `json:"reasons,omitempty"`
 }
 
 func (h *Handler) CalendarStatus(ctx context.Context) (CalendarDetails, error) {

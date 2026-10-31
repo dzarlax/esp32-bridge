@@ -51,9 +51,10 @@ The ESP32 has limited memory and TLS connections. Instead of making 7+ HTTPS cal
 can ignore the header; clients that track calendar completeness can use it to
 avoid treating a partial or empty result as a complete free day.
 
-Native endpoints require authentication. Use `X-API-Key`; photo-frame routes
-require this header and do not accept query-only credentials. Other legacy
-native handlers also accept `?key=`. Managed displays send `X-Device-ID` for
+Native endpoints require exactly one nonempty `X-API-Key` header. Query-only
+credentials return 401. Even with a valid header, a `key` query parameter
+(including an empty or encoded name) returns 400 `query_key_not_supported`.
+Device sync and probe follow the same rule. Managed displays send `X-Device-ID` for
 profile routing; overlay context and image requests require it. The `/health`
 endpoint is public. Administrative APIs use their separate session/CSRF flow.
 
@@ -281,7 +282,8 @@ in [settings-contract.md](docs/settings-contract.md#localization-and-persistent-
 Managed firmware generates a stable `device_id` in a separate NVS namespace and
 sends `X-Device-ID` on all native API requests. The identity survives preferences
 reset, reboot and network changes. Unknown identities must sync before reading
-managed data. Headerless legacy reads keep the default environment configuration;
+managed data. Reads without `X-Device-ID` keep the default environment configuration
+(the API-key header is still required);
 when administration is disabled, native API behavior remains compatible.
 
 The panel supports either or both independent authentication methods:
@@ -464,8 +466,19 @@ The authenticated per-device `GET /api/admin/v1/devices/{id}/calendar-status`
 returns the saved selection's source states and reasons, without event content.
 The Calendar settings panel checks this explicitly and resolves names through the
 existing catalog. These GETs do not trigger provider sync or send invitations.
-Coverage and last-sync timestamps are not exposed by the current cached-events
-contract, so a generic incomplete reason stays generic.
+Sources expose nullable UTC `last_success_at` and `next_sync_at`, nullable
+`coverage_complete`, and an optional safe `error_code`. Older upstreams without
+these fields remain supported; unknown timestamps are not presented as fresh.
+The panel formats dates in the browser timezone. A future next-sync time is a
+normal schedule; a future last-success time is flagged as possible clock skew.
+Allowed error codes are `transient`, `rate_limited`, `auth`, `permission`,
+`unsupported`, and `protocol`; provider error text is never returned here.
+
+Completeness is downgraded for missing selected sources, non-ready/stale sources,
+explicitly incomplete coverage, or source errors. Partial photo-frame events are
+restricted to selected, ready, explicitly fresh sources without explicit coverage
+failure or error. Legacy absent coverage remains compatible. No eligible event
+clears the old event card; partial events retain the available-calendars caption.
 
 Dashboard responses add `sections` entries with `state` and, on success,
 `age_seconds` measured from the exact acquired/cached payload. Cache hits never
@@ -480,3 +493,16 @@ Validation covers stale/partial reasons, selected-device admin auth, DST/all-day
 mapping, cache acquisition age, missing metrics and frontend status checks. No
 persistent settings migration, credential changes or notification writes are
 introduced. Production deployment is separate from this local candidate.
+
+### OTA terminal state and device observation
+
+After a successful image write, firmware reports `rebooting`. Terminal success
+clears the pending target and active stage; Bridge also normalizes legacy
+successful history entries. Failed/unknown attempts keep only a historical stage
+label, never an active progress indicator. An uncertain attempt is not rewritten
+as success merely because the target version is later observed.
+
+`tools/device_soak.py` provides bounded read-only observation with incremental
+private JSONL and a summary. It cannot restart or flash a device, and its result
+is separate from physical acceptance. See [the device acceptance checklist](docs/device-acceptance-checklist.md)
+for three supervised restarts, a 24-hour run, and day/night checks.
