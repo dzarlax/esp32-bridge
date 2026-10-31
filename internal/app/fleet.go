@@ -1,8 +1,10 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"esp32-bridge/internal/config"
+	"esp32-bridge/internal/handler"
 	"esp32-bridge/internal/settings"
 	"net/http"
 	"regexp"
@@ -129,4 +131,11 @@ func (f *Fleet) Updates(id, current string) map[string]any {
 		return m.Updates(current)
 	}
 	return map[string]any{"error": "unknown_device"}
+}
+
+func (f *Fleet) CalendarStatus(ctx context.Context, id string) (handler.CalendarDetails, error) {
+	if m := f.current.Load().nodes[id]; m != nil {
+		return m.current.Load().handler.CalendarStatus(ctx)
+	}
+	return handler.CalendarDetails{}, errors.New("device not found")
 }

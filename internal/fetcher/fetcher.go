@@ -34,6 +34,16 @@ func NewOrchestrator(fetchers []Fetcher, c *cache.Cache, timeout time.Duration) 
 }
 
 func (o *Orchestrator) FetchAll() map[string]json.RawMessage {
+	results, _ := o.FetchAllWithStatus()
+	return results
+}
+
+// FetchAllWithStatus keeps acquisition metadata paired with this response's data.
+func (o *Orchestrator) FetchAllWithStatus() (map[string]json.RawMessage, map[string]Status) {
+	states := make(map[string]Status, len(o.fetchers))
+	for _, f := range o.fetchers {
+		states[f.Name()] = Status{State: "error"}
+	}
 	results := make(map[string]json.RawMessage, len(o.fetchers))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -45,6 +55,7 @@ func (o *Orchestrator) FetchAll() map[string]json.RawMessage {
 			o.recordAt(name, at)
 			mu.Lock()
 			results[name] = data
+			states[name] = Status{State: "ready", LastSuccess: at}
 			mu.Unlock()
 			continue
 		}
@@ -68,15 +79,17 @@ func (o *Orchestrator) FetchAll() map[string]json.RawMessage {
 				o.record(f.Name(), false)
 				log.Printf("[%s] fetch failed", f.Name())
 				results[f.Name()] = nil
+				states[f.Name()] = Status{State: "error"}
 				return
 			}
 			o.recordAt(f.Name(), at)
 			results[f.Name()] = data
+			states[f.Name()] = Status{State: "ready", LastSuccess: at}
 		}(f)
 	}
 
 	wg.Wait()
-	return results
+	return results, states
 }
 
 func (o *Orchestrator) Invalidate(name string) {

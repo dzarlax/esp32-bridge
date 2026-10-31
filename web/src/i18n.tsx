@@ -5,6 +5,21 @@ export const UI_LOCALES: readonly UILocale[] = ["ru", "en", "sr-Latn"];
 const storageKey = "homedash.ui.locale";
 
 const enCatalog = {
+ "Данные источника неполные": "Source data is incomplete",
+ "Источник сообщил об ошибке": "Source reported an error",
+  "Расписание полное": "Schedule complete",
+  "Данные актуальны": "Data is current",
+  "Данные календаря ожидают обновления": "Calendar data awaiting refresh",
+  "Источник ещё не готов": "Source is not ready yet",
+  "Расписание может быть неполным": "Schedule may be incomplete",
+  "Причина неполноты неизвестна": "Reason for incompleteness unknown",
+  "Календарь выключен": "Calendar disabled",
+  "Состояние сохранённых календарей": "Saved calendar status",
+  "Проверяю календари…": "Checking calendars…",
+  "Проверить календари": "Check calendars",
+  "Не удалось проверить календари. Повторите запрос.": "Could not check calendars. Try again.",
+  "Статусы относятся к сохранённому выбору. Обновление страницы не запускает синхронизацию провайдера.": "Statuses refer to the saved selection. Refreshing this view does not start provider synchronization.",
+
   "Уровень выбран в черновике. Можно сохранить изменения.": "Level selected in the draft. You can save changes.",
   "Уровни используются по локальному времени дисплея.": "Levels follow the display's local time.",
   "Проверка яркости": "Brightness test",
@@ -501,6 +516,21 @@ const enCatalog = {
 type MessageKey = keyof typeof enCatalog;
 
 const srCatalog = {
+ "Данные источника неполные": "Podaci izvora nisu potpuni",
+ "Источник сообщил об ошибке": "Izvor je prijavio grešku",
+  "Расписание полное": "Raspored je potpun",
+  "Данные актуальны": "Podaci su ažurni",
+  "Данные календаря ожидают обновления": "Podaci kalendara čekaju osvežavanje",
+  "Источник ещё не готов": "Izvor još nije spreman",
+  "Расписание может быть неполным": "Raspored možda nije potpun",
+  "Причина неполноты неизвестна": "Razlog nepotpunosti nije poznat",
+  "Календарь выключен": "Kalendar je isključen",
+  "Состояние сохранённых календарей": "Status sačuvanih kalendara",
+  "Проверяю календари…": "Provera kalendara…",
+  "Проверить календари": "Proveri kalendare",
+  "Не удалось проверить календари. Повторите запрос.": "Provera kalendara nije uspela. Pokušajte ponovo.",
+  "Статусы относятся к сохранённому выбору. Обновление страницы не запускает синхронизацию провайдера.": "Statusi se odnose na sačuvani izbor. Osvežavanje prikaza ne pokreće sinhronizaciju provajdera.",
+
   "Уровень выбран в черновике. Можно сохранить изменения.": "Nivo je izabran u nacrtu. Možete sačuvati promene.",
   "Уровни используются по локальному времени дисплея.": "Nivoi se koriste po lokalnom vremenu ekrana.",
   "Проверка яркости": "Test osvetljenja",

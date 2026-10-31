@@ -102,7 +102,7 @@ func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results := h.orch.FetchAll()
+	results, states := h.orch.FetchAllWithStatus()
 
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, `{"ts":%d`, time.Now().Unix())
@@ -114,6 +114,23 @@ func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, `,"%s":%s`, key, data)
 		}
 	}
+	metadata := map[string]any{}
+	for _, key := range sectionKeys {
+		state, enabled := states[key]
+		value := map[string]any{"state": state.State}
+		if !enabled {
+			value["state"] = "disabled"
+		}
+		if enabled && state.State == "" {
+			value["state"] = "error"
+		}
+		if !state.LastSuccess.IsZero() {
+			value["age_seconds"] = max(0, int64(time.Since(state.LastSuccess).Seconds()))
+		}
+		metadata[key] = value
+	}
+	encoded, _ := json.Marshal(metadata)
+	fmt.Fprintf(w, `,"sections":%s`, encoded)
 	if h.migrateBridgeURL != "" {
 		fmt.Fprintf(w, `,"config":{"bridge_url":"%s"}`, h.migrateBridgeURL)
 	}
@@ -299,13 +316,15 @@ func (h *Handler) Calendar(w http.ResponseWriter, r *http.Request) {
 	dayEnd := dayStart.AddDate(0, 0, 1)
 	if h.calendarPlatformEnabled() {
 		complete := false
-		events, err := h.fetchCalendarPlatformEvents(r, dayStart, dayEnd, &complete)
+		details := CalendarDetails{Date: date}
+		events, err := h.fetchCalendarPlatformEventsDetailed(r, dayStart, dayEnd, &details, &complete)
 		if err != nil {
 			log.Printf("[calendar] Calendar Platform error: %v", err)
 			http.Error(w, `{"error":"calendar source unavailable"}`, http.StatusBadGateway)
 			return
 		}
 		setCalendarState(w, complete)
+		w.Header().Set("X-HomeDash-Calendar-Reason", details.Reason)
 		writeCalendarEvents(w, events)
 		return
 	}
@@ -401,6 +420,9 @@ type calendarPlatformEvent struct {
 }
 
 func (h *Handler) fetchCalendarPlatformRaw(r *http.Request, dayStart, dayEnd time.Time, strict bool, completeness ...*bool) ([]calendarPlatformEvent, error) {
+	return h.fetchCalendarPlatformRawDetailed(r, dayStart, dayEnd, strict, nil, completeness...)
+}
+func (h *Handler) fetchCalendarPlatformRawDetailed(r *http.Request, dayStart, dayEnd time.Time, strict bool, details *CalendarDetails, completeness ...*bool) ([]calendarPlatformEvent, error) {
 	u, err := url.Parse(h.calendarPlatformBaseURL + "/api/native/v1/cached-events")
 	if err != nil {
 		return nil, err
@@ -437,6 +459,51 @@ func (h *Handler) fetchCalendarPlatformRaw(r *http.Request, dayStart, dayEnd tim
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload); err != nil {
 		return nil, err
 	}
+	if details != nil {
+		details.Complete = payload.Complete
+		details.Reason = "complete"
+		seen := map[string]bool{}
+		for _, source := range payload.Sources {
+			selected := false
+			for _, id := range h.calendarPlatformIDs {
+				if id == source.CalendarID {
+					selected = true
+					break
+				}
+			}
+			if !selected || seen[source.CalendarID] {
+				continue
+			}
+			seen[source.CalendarID] = true
+			reason := "ready"
+			if source.Status != "ready" {
+				reason = "source_pending"
+				if source.Status == "degraded" {
+					reason = "source_incomplete"
+				}
+				if source.Status == "error" || source.Status == "failed" || source.Status == "unavailable" {
+					reason = "source_error"
+				}
+			} else if source.Stale == nil {
+				reason = "unknown"
+			} else if *source.Stale {
+				reason = "cache_stale"
+			}
+			details.Sources = append(details.Sources, CalendarSource{ID: source.CalendarID, State: source.Status, Stale: source.Stale, Reason: reason})
+		}
+		if !payload.Complete {
+			details.Reason = "incomplete"
+			allReady := len(seen) == len(h.calendarPlatformIDs)
+			stale := false
+			for _, source := range details.Sources {
+				allReady = allReady && source.State == "ready" && source.Stale != nil
+				stale = stale || (source.Stale != nil && *source.Stale)
+			}
+			if allReady && stale {
+				details.Reason = "cache_stale"
+			}
+		}
+	}
 	for _, result := range completeness {
 		if result != nil {
 			*result = payload.Complete
@@ -468,7 +535,10 @@ func (h *Handler) fetchCalendarPlatformRaw(r *http.Request, dayStart, dayEnd tim
 }
 
 func (h *Handler) fetchCalendarPlatformEvents(r *http.Request, dayStart, dayEnd time.Time, completeness ...*bool) ([]model.CalendarEvent, error) {
-	items, err := h.fetchCalendarPlatformRaw(r, dayStart, dayEnd, false, completeness...)
+	return h.fetchCalendarPlatformEventsDetailed(r, dayStart, dayEnd, nil, completeness...)
+}
+func (h *Handler) fetchCalendarPlatformEventsDetailed(r *http.Request, dayStart, dayEnd time.Time, details *CalendarDetails, completeness ...*bool) ([]model.CalendarEvent, error) {
+	items, err := h.fetchCalendarPlatformRawDetailed(r, dayStart, dayEnd, false, details, completeness...)
 	if err != nil {
 		return nil, err
 	}

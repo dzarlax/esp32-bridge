@@ -51,7 +51,7 @@ func main() {
 		commit()
 		runtime.EnableManaged()
 		auth.Register(mux)
-		api := &management.API{Store: store, DeviceKey: cfg.APIKey, Statuses: runtime.Statuses, Updates: runtime.Updates}
+		api := &management.API{Store: store, DeviceKey: cfg.APIKey, Statuses: runtime.Statuses, Updates: runtime.Updates, CalendarStatus: runtime.CalendarStatus}
 		api.Register(mux, auth.Require)
 		mux.Handle("/settings/", webui.Handler())
 		mux.HandleFunc("/settings", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/settings/", http.StatusSeeOther) })
