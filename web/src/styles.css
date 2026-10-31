@@ -1855,3 +1855,6 @@ input[aria-invalid="true"] {
   accent-color: var(--teal);
 }
 .catalog-option span { min-width: 0; }
+.backlight-status { border: 1px solid var(--line, #d8e4e7); border-radius: 12px; padding: 16px; margin: 16px 0; overflow-wrap: anywhere; }
+.backlight-status h3 { margin-top: 0; }
+.backlight-status p { margin: 8px 0; }

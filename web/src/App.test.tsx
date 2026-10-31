@@ -417,6 +417,26 @@ describe("multi-display shell", () => {
     expect(fetchMock.mock.calls.some(([path, init]) => String(path).endsWith(`/devices/${firstId}/settings`) && (init?.method ?? "GET") === "GET")).toBe(true);
   });
 
+  it("withdraws backlight confirmation immediately after a failed settings poll", async () => {
+    let fail = false;
+    const fetchMock = installFetch([{ id: firstId, name: "Hall" }], async id => {
+      if (fail) throw new Error("offline");
+      return { ...settingsEnvelope(id, "Hall"), device: { ...settingsEnvelope(id, "Hall").device,
+        backlight_report: { version: 1, phase: "restored", output_known: true, last_command: 50,
+          test_command: 70, return_command: 50, sample_uptime_ms: 30000, restore_deadline_uptime_ms: 30000, error: "" } } };
+    });
+    render(<App />);
+    await screen.findByText("Команда возврата выполнена");
+    fireEvent.click(screen.getByRole("button", { name: "Об устройстве" }));
+    fail = true;
+    fireEvent.click(screen.getByRole("button", { name: "Обновить статус" }));
+    await screen.findByText("Не удалось обновить статус. Показано последнее известное состояние.");
+    fireEvent.click(screen.getByRole("button", { name: "Экран" }));
+    expect(screen.getByText("Нет свежего подтверждения подсветки")).toBeTruthy();
+    expect(screen.queryByText("Команда возврата выполнена")).toBeNull();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(0);
+  });
+
   it.each([
     [409, "revision_conflict"],
     [422, "invalid_settings"],

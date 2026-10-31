@@ -786,6 +786,9 @@ func disableRemovedSelections(st *diskState, removed disconnectSet) {
 }
 
 func (s *Store) Sync(d Device) (SyncResponse, error) {
+	if !validBacklightReport(d.BacklightReport, d.UptimeSeconds) {
+		return SyncResponse{}, errors.New("invalid backlight report")
+	}
 	if d.BacklightPercent != nil && (*d.BacklightPercent < 0 || *d.BacklightPercent > 100) {
 		return SyncResponse{}, errors.New("invalid backlight")
 	}
@@ -824,6 +827,9 @@ func (s *Store) Sync(d Device) (SyncResponse, error) {
 	defer s.mu.Unlock()
 	next := clone(s.state)
 	profile, registered := next.Profiles[d.DeviceID]
+	if err := rejectOlderBacklight(s.devices[d.DeviceID], d); err != nil {
+		return SyncResponse{}, err
+	}
 	newProfile := !registered
 	if newProfile {
 		if len(next.Profiles) >= MaxDevices {
@@ -964,7 +970,8 @@ func (s *Store) Sync(d Device) (SyncResponse, error) {
 		tz = "CET-1CEST,M3.5.0,M10.5.0/3"
 	}
 	response := SyncResponse{
-		DeviceID: d.DeviceID, BridgeID: s.state.BridgeID, Revision: profile.Revision,
+		BacklightReportVersion: 1,
+		DeviceID:               d.DeviceID, BridgeID: s.state.BridgeID, Revision: profile.Revision,
 		Preferences: Preferences{Screen: values.Screen, Home: HomePreferences{Favorites: append([]Favorite{}, values.Services["home"].Favorites...)}, Photos: values.Photos, Visible: visible, POSIXTimezone: tz, SettingsURL: s.baseURL + "/settings/?device_id=" + d.DeviceID},
 	}
 	if (!scopeMatches || d.AppliedRevision != profile.Revision) && slices.Contains(d.Capabilities, "network") && len(profile.Network) > 0 {

@@ -163,6 +163,18 @@ func TestMultiDeviceManagementRoutesAndNativeIdentity(t *testing.T) {
 	if syncResponse.DeviceID != deviceID || syncResponse.BridgeID != store.BridgeID() || syncResponse.Preferences.Screen.Name != "Display aaaaaa" {
 		t.Fatalf("bad scoped sync response: %#v", syncResponse)
 	}
+	if syncResponse.BacklightReportVersion != 1 {
+		t.Fatal("backlight capability not advertised")
+	}
+	device.BacklightReport = &settings.BacklightReport{Version: 1, Phase: "unknown"}
+	if w := call("POST", "/api/device/v1/sync", device, nil, "", "", "device-api-key", deviceID); w.Code != http.StatusOK {
+		t.Fatalf("negotiated backlight report rejected: %d %s", w.Code, w.Body.String())
+	}
+	device.BacklightReport.Phase = "measured"
+	if w := call("POST", "/api/device/v1/sync", device, nil, "", "", "device-api-key", deviceID); w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid backlight report accepted: %d", w.Code)
+	}
+	device.BacklightReport = nil
 	listed := call("GET", "/api/admin/v1/devices", nil, cookies, "", "", "", "")
 	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), deviceID) {
 		t.Fatalf("registered profile missing: %s", listed.Body.String())

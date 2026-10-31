@@ -110,31 +110,32 @@ type Result struct {
 	Error string `json:"error,omitempty"`
 }
 type Device struct {
-	DeviceID         string     `json:"device_id,omitempty"`
-	Connected        bool       `json:"connected"`
-	BridgeID         string     `json:"bridge_id,omitempty"`
-	LastSeen         *time.Time `json:"last_seen"`
-	AppliedRevision  uint64     `json:"applied_revision"`
-	AppliedLocale    string     `json:"applied_locale,omitempty"`
-	Firmware         string     `json:"firmware"`
-	BootID           string     `json:"boot_id"`
-	IP               string     `json:"ip"`
-	SSID             string     `json:"ssid"`
-	UptimeSeconds    uint64     `json:"uptime_seconds"`
-	TimeSynced       bool       `json:"time_synced"`
-	Capabilities     []string   `json:"capabilities"`
-	Error            string     `json:"error"`
-	CommandResult    *Result    `json:"command_result,omitempty"`
-	AvailableVersion string     `json:"available_version,omitempty"`
-	OTAProgress      int        `json:"ota_progress,omitempty"`
-	OTAAttemptID     string     `json:"ota_attempt_id,omitempty"`
-	OTAStage         string     `json:"ota_stage,omitempty"`
-	OTAError         string     `json:"ota_error,omitempty"`
-	BacklightPercent *int       `json:"backlight_percent,omitempty"`
-	BacklightError   string     `json:"backlight_error,omitempty"`
-	Model            string     `json:"model,omitempty"`
-	Width            int        `json:"width,omitempty"`
-	Height           int        `json:"height,omitempty"`
+	BacklightReport  *BacklightReport `json:"backlight_report,omitempty"`
+	DeviceID         string           `json:"device_id,omitempty"`
+	Connected        bool             `json:"connected"`
+	BridgeID         string           `json:"bridge_id,omitempty"`
+	LastSeen         *time.Time       `json:"last_seen"`
+	AppliedRevision  uint64           `json:"applied_revision"`
+	AppliedLocale    string           `json:"applied_locale,omitempty"`
+	Firmware         string           `json:"firmware"`
+	BootID           string           `json:"boot_id"`
+	IP               string           `json:"ip"`
+	SSID             string           `json:"ssid"`
+	UptimeSeconds    uint64           `json:"uptime_seconds"`
+	TimeSynced       bool             `json:"time_synced"`
+	Capabilities     []string         `json:"capabilities"`
+	Error            string           `json:"error"`
+	CommandResult    *Result          `json:"command_result,omitempty"`
+	AvailableVersion string           `json:"available_version,omitempty"`
+	OTAProgress      int              `json:"ota_progress,omitempty"`
+	OTAAttemptID     string           `json:"ota_attempt_id,omitempty"`
+	OTAStage         string           `json:"ota_stage,omitempty"`
+	OTAError         string           `json:"ota_error,omitempty"`
+	BacklightPercent *int             `json:"backlight_percent,omitempty"`
+	BacklightError   string           `json:"backlight_error,omitempty"`
+	Model            string           `json:"model,omitempty"`
+	Width            int              `json:"width,omitempty"`
+	Height           int              `json:"height,omitempty"`
 }
 type Status struct {
 	State       string     `json:"state"`
@@ -184,11 +185,12 @@ type DevicesList struct {
 	MaxDevices int             `json:"max_devices"`
 }
 type SyncResponse struct {
-	DeviceID    string      `json:"device_id"`
-	BridgeID    string      `json:"bridge_id"`
-	Revision    uint64      `json:"revision"`
-	Preferences Preferences `json:"preferences"`
-	Command     *Command    `json:"command"`
+	BacklightReportVersion int         `json:"backlight_report_version"`
+	DeviceID               string      `json:"device_id"`
+	BridgeID               string      `json:"bridge_id"`
+	Revision               uint64      `json:"revision"`
+	Preferences            Preferences `json:"preferences"`
+	Command                *Command    `json:"command"`
 }
 type HomePreferences struct {
 	Favorites []Favorite `json:"favorites"`
