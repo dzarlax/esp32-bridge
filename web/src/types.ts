@@ -97,7 +97,19 @@ export type ConnectionsEnvelope = {
   connections: SharedConnections;
   secrets_present: Record<SecretKey, boolean>;
 };
+export type BacklightReport = {
+  version: 1;
+  phase: "unknown" | "reference" | "preview" | "restored" | "error";
+  last_command: number | null;
+  output_known: boolean;
+  test_command?: number | null;
+  return_command?: number | null;
+  sample_uptime_ms: number;
+  restore_deadline_uptime_ms?: number | null;
+  error: "" | "write_failed";
+};
 export type Device = {
+  backlight_report?: BacklightReport;
   connected: boolean;
   last_seen: string | null;
   applied_revision: number;

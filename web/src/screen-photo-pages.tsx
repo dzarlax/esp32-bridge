@@ -1,4 +1,5 @@
 import { CatalogPicker } from "./catalog-picker";
+import { BacklightStatus } from "./backlight-status";
 import previewPhoto from "./assets/photo-preview.webp";
 import { useId, useState } from "react";
 import { numberError, photoTimingLimits } from "./validation";
@@ -18,7 +19,7 @@ import {
 } from "./ui";
 import { useT } from "./i18n";
 
-export function ScreenPage({ draft, edit, envelope, runAction, busy, pendingCommand }: PageProps) {
+export function ScreenPage({ draft, edit, envelope, runAction, busy, pendingCommand, deviceObservationFresh }: PageProps) {
   const t = useT();
   const idleHelp = useId();
   const [previewPercent, setPreviewPercent] = useState(50);
@@ -157,7 +158,8 @@ export function ScreenPage({ draft, edit, envelope, runAction, busy, pendingComm
         >
           {" "}{t("Яркость")}{" "}</SectionHeading>
         {!envelope.capabilities.brightness && <p>{t("Яркость недоступна до проверки и калибровки подсветки устройства.")}</p>}
-        {envelope.device.backlight_percent !== undefined && <p>{t("Фактическая яркость")}: {envelope.device.backlight_percent}%</p>}
+        <BacklightStatus device={envelope.device} transportFresh={deviceObservationFresh ?? false} />
+        {envelope.device.backlight_percent !== undefined && <p>{t("Уровень по настройке")}: {envelope.device.backlight_percent}%</p>}
         <Field label={t("Дневная яркость")}><input type="range" min={10} max={100} value={s.backlight_percent ?? 100} disabled={!envelope.capabilities.brightness} onChange={(e) => set("backlight_percent", Number(e.target.value))} /> <span>{s.backlight_percent ?? 100}%</span></Field>
         <Field label={t("Ночное действие")}><Select value={s.night_action || "off"} disabled={!envelope.capabilities.brightness} onChange={(e) => { const action = e.target.value as "off" | "dim"; edit({ ...draft, screen: { ...s, night_action: action, ...(action === "dim" ? { backlight_percent: s.backlight_percent ?? 100, night_backlight_percent: s.night_backlight_percent ?? 20 } : {}) } }); }}><option value="off">{t("Выключить экран")}</option><option value="dim">{t("Уменьшить яркость")}</option></Select></Field>
         {s.night_action === "dim" && <Field label={t("Ночная яркость")}><input type="range" min={10} max={100} value={s.night_backlight_percent ?? 20} disabled={!envelope.capabilities.brightness} onChange={(e) => set("night_backlight_percent", Number(e.target.value))} /> <span>{s.night_backlight_percent ?? 20}%</span></Field>}

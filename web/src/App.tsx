@@ -617,6 +617,7 @@ function AppContent() {
     freshnessClock - updatesSnapshotReadAt < FIRMWARE_READ_MAX_AGE_MS;
   const pendingCommand = !isCommandFinal(command);
   const pageProps: PageProps | null = envelope && draft ? {
+    deviceObservationFresh: !statusStale && deviceSnapshotReadAt !== null && freshnessClock - deviceSnapshotReadAt < 20000,
     draft, edit, envelope, deviceId: selectedDeviceId, onOpenConnections: openConnections,
     setServiceDetail, serviceDetail, setNetworkCredentials: (updater) => { formEditSequence.current++; setNetworkCredentials(updater); dirtyRef.current = true; setDirty(true); },
     networkCredentials, networkEditing, setNetworkEditing, updates, firmwareObservationFresh, command, pendingCommand,

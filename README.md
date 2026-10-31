@@ -393,3 +393,29 @@ The admin-only Home Assistant catalog uses the shared saved URL and token to fet
 OTA history records device-reported results, while a timeout is unknown rather than a failure. The panel reports a version as current only when the display's heartbeat is fresh; offline versions are shown as last known. A matching live version observation does not rewrite an uncertain OTA attempt.
 
 Rollback requires a private, verified backup of the complete Bridge settings state made before this version writes it. Earlier Bridge versions decode stored JSON strictly and cannot safely read state containing the new optional fields; restoring that backup also restores the settings, credentials, revisions, and command state it contained at backup time. Do not overwrite newer state without accounting for those changes.
+
+### Backlight command feedback (HomeDash v1.0.34)
+
+A validated sync response advertises `backlight_report_version: 1`. Firmware
+sends the optional `backlight_report` only after this negotiation; a changed
+Bridge URL/key, reboot, or HTTP 400 withdraws support. The report describes the
+last acknowledged I²C command, output certainty, reference/preview/restore/error
+phase, last test/return commands, and monotonic sample/deadline milliseconds.
+It does **not** measure luminance. Values are driver command units, not percent
+brightness. Reports are validated and scoped to a display and boot; older
+snapshots within the same boot are rejected. Status is held in memory only;
+missing reports and new unknown boots clear previous observations.
+
+The Screen → Brightness section shows this feedback even before calibration.
+An offline device, failed settings read, invalid timestamp, or response older
+than 20 seconds makes the current value unknown. The last successful command
+remains historical. The estimated countdown never confirms restoration: the
+panel waits for a fresh restored report. Feedback is available in Russian,
+English, and Serbian Latin and uses existing polling intervals.
+
+Diagnostic firmware offers local-only, explicit 20-second tests at commands 40
+and 70, each returning to the user-accepted reference 50. This does not enable
+the calibrated brightness capability, arbitrary remote PWM, or automatic night
+dimming. Deploy this Bridge before the negotiated firmware; older peers keep
+working without the new feedback. This extension adds no persistent-state
+migration; the rollback caveat above concerns earlier settings features.
