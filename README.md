@@ -419,3 +419,10 @@ the calibrated brightness capability, arbitrary remote PWM, or automatic night
 dimming. Deploy this Bridge before the negotiated firmware; older peers keep
 working without the new feedback. This extension adds no persistent-state
 migration; the rollback caveat above concerns earlier settings features.
+
+HomeDash v1.0.35's diagnostic comparison candidate remains compatible with
+`backlight_report` v1: sequential steps and commands 1…97 are accepted, and a
+restored report retains the last candidate with acknowledged return command 50.
+Locally selected bright/dim endpoints are not transmitted as current hardware
+state or automatically applied settings. Existing panel reports remain read-only;
+this workflow adds no server-side calibration command or persistent-state schema.
