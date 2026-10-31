@@ -97,3 +97,31 @@ func TestBacklightReportScopeOrderingAndReset(t *testing.T) {
 		t.Fatal("old boot command retained")
 	}
 }
+
+func TestBacklightStepSequenceAndEndpoints(t *testing.T) {
+	s, _ := newStore(t, nil)
+	d := report(s, testID('a'), "step-boot")
+	for i, command := range []int{45, 40, 35, 1, 97} {
+		sample := uint64(1000 + i*1000)
+		d.UptimeSeconds = sample / 1000
+		d.BacklightReport = &BacklightReport{Version: 1, Phase: "preview", LastCommand: lightInt(command), OutputKnown: true, TestCommand: lightInt(command), ReturnCommand: lightInt(50), SampleUptimeMS: sample, RestoreDeadlineUptimeMS: lightTime(sample + 20000)}
+		if _, err := s.Sync(d); err != nil {
+			t.Fatalf("step %d: %v", command, err)
+		}
+		v, _ := s.View(d.DeviceID, nil)
+		if *v.Device.BacklightReport.LastCommand != command {
+			t.Fatal("snapshot not updated")
+		}
+	}
+	d.UptimeSeconds = 25
+	d.BacklightReport.Phase = "restored"
+	d.BacklightReport.LastCommand = lightInt(50)
+	d.BacklightReport.SampleUptimeMS = 25000
+	if _, err := s.Sync(d); err != nil {
+		t.Fatal(err)
+	}
+	v, _ := s.View(d.DeviceID, nil)
+	if *v.Device.BacklightReport.TestCommand != 97 || *v.Device.BacklightReport.LastCommand != 50 {
+		t.Fatal("restore lost the last candidate")
+	}
+}
