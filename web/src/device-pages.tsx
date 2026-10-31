@@ -250,6 +250,10 @@ function CommandCard({ command, online = false, currentVersion = "" }: { command
   };
   const actionLabel: Record<string, string> = {
     photo_start: "Запуск фоторамки",
+    backlight_adjust: "Подбор яркости",
+    backlight_begin: "Подбор яркости",
+    backlight_preview: "Проверка яркости",
+    backlight_restore: "Восстановить яркость",
     restart: "Перезапуск",
     ota_check: "Проверка обновлений",
     ota_install: "Установка обновления",

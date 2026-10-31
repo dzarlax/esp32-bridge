@@ -185,12 +185,13 @@ type DevicesList struct {
 	MaxDevices int             `json:"max_devices"`
 }
 type SyncResponse struct {
-	BacklightReportVersion int         `json:"backlight_report_version"`
-	DeviceID               string      `json:"device_id"`
-	BridgeID               string      `json:"bridge_id"`
-	Revision               uint64      `json:"revision"`
-	Preferences            Preferences `json:"preferences"`
-	Command                *Command    `json:"command"`
+	BacklightControlVersion int         `json:"backlight_control_version"`
+	BacklightReportVersion  int         `json:"backlight_report_version"`
+	DeviceID                string      `json:"device_id"`
+	BridgeID                string      `json:"bridge_id"`
+	Revision                uint64      `json:"revision"`
+	Preferences             Preferences `json:"preferences"`
+	Command                 *Command    `json:"command"`
 }
 type HomePreferences struct {
 	Favorites []Favorite `json:"favorites"`

@@ -388,6 +388,14 @@ function AppContent() {
       setInvalidTiming(validation.field);
       return validation.message;
     }
+    const before = envelope.settings.screen;
+    const after = draft.screen;
+    const brightnessChanged = before.backlight_percent !== after.backlight_percent || before.night_backlight_percent !== after.night_backlight_percent || before.night_action !== after.night_action;
+    if (brightnessChanged && envelope.device.backlight_report?.phase === "preview") {
+      const message = t("Дождитесь подтверждённого возврата яркости перед сохранением.");
+      setAlert({ kind: "error", text: message });
+      return message;
+    }
     const entityLengthError = homeEntityLengthError(draft.services.home, envelope.settings.services.home);
     if (entityLengthError) {
       const message = t(entityLengthError);
@@ -547,14 +555,14 @@ function AppContent() {
 
   async function doAction(action: Ask["action"], percent?: number) {
     const deviceId = selectedDeviceRef.current;
-    if (!envelope || !deviceId || busy) return;
+    if (!envelope || !deviceId || busy) return null;
     if (!canRun(envelope.device, action)) { setAlert({ kind: "error", text: "Устройство не в сети или не сообщило поддержку этой команды." }); return; }
     const epoch = selectionEpoch.current;
     setBusy(true);
     setAlert(null);
     try {
       const result = await api.action(deviceId, action, percent);
-      if (selectedDeviceRef.current !== deviceId || selectionEpoch.current !== epoch) return;
+      if (selectedDeviceRef.current !== deviceId || selectionEpoch.current !== epoch) return null;
       setCommand(result.command);
       setConfirm(null);
       setAlert({ kind: "info", text: "Команда принята. Результат появится после подтверждения устройством." });
@@ -563,8 +571,10 @@ function AppContent() {
         setEnvelope(latest);
         setCommand(latest.device.command ?? result.command);
       }
+      return result.command;
     } catch (reason) {
       if (selectedDeviceRef.current === deviceId && selectionEpoch.current === epoch) setAlert({ kind: "error", text: reason instanceof Error ? reason.message : "Команда не выполнена" });
+      return null;
     } finally { setBusy(false); }
   }
 

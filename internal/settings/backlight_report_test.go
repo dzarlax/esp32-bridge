@@ -1,6 +1,9 @@
 package settings
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func lightInt(v int) *int        { return &v }
 func lightTime(v uint64) *uint64 { return &v }
@@ -123,5 +126,82 @@ func TestBacklightStepSequenceAndEndpoints(t *testing.T) {
 	v, _ := s.View(d.DeviceID, nil)
 	if *v.Device.BacklightReport.TestCommand != 97 || *v.Device.BacklightReport.LastCommand != 50 {
 		t.Fatal("restore lost the last candidate")
+	}
+}
+
+func TestLiveBacklightCapabilityAndPendingPreview(t *testing.T) {
+	s, _ := newStore(t, nil)
+	id := testID('a')
+	other := testID('b')
+	register(t, s, id, "boot", "backlight_brightness", "backlight_preview", "backlight_restore")
+	register(t, s, other, "other")
+	n := 36
+	if _, err := s.EnqueueOptions(id, "backlight_adjust", false, &n, ""); err != ErrUnavailable {
+		t.Fatalf("old capability accepted: %v", err)
+	}
+	register(t, s, id, "boot", "backlight_brightness", "backlight_adjust", "backlight_begin", "backlight_restore")
+	for _, bad := range []int{0, 9, 101} {
+		if _, err := s.EnqueueOptions(id, "backlight_adjust", false, &bad, ""); err == nil {
+			t.Fatal("invalid percent accepted")
+		}
+	}
+	c, err := s.EnqueueOptions(id, "backlight_adjust", false, &n, "")
+	if err != nil || c.Percent == nil || *c.Percent != 36 {
+		t.Fatalf("enqueue: %v", err)
+	}
+	if _, err := s.EnqueueOptions(other, "backlight_adjust", false, &n, ""); err != ErrUnavailable {
+		t.Fatal("cross-display capability leak")
+	}
+	d := report(s, id, "boot", "backlight_brightness", "backlight_adjust", "backlight_begin", "backlight_restore")
+	d.UptimeSeconds = 12
+	d.BacklightReport = previewReport()
+	d.CommandResult = &Result{ID: c.ID, State: "succeeded"}
+	if _, err := s.Sync(d); err != nil {
+		t.Fatal(err)
+	}
+	v, _ := s.View(id, nil)
+	v.Settings.Screen.BacklightPercent = &n
+	if err := s.Update(id, v.Revision, Patch{Settings: v.Settings}); err != ErrBusy {
+		t.Fatalf("saved during preview: %v", err)
+	}
+	d.BacklightReport.Phase = "restored"
+	d.BacklightReport.LastCommand = lightInt(50)
+	d.BacklightReport.SampleUptimeMS = 21000
+	d.UptimeSeconds = 21
+	if _, err := s.Sync(d); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Update(id, v.Revision, Patch{Settings: v.Settings}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EnqueueOptions(id, "backlight_begin", false, &n, ""); err != nil {
+		t.Fatalf("explicit start: %v", err)
+	}
+	// Clearing an unsupported configuration and retaining night-off must remain possible.
+	register(t, s, id, "new-boot")
+	v, _ = s.View(id, nil)
+	v.Settings.Screen.BacklightPercent = nil
+	v.Settings.Screen.NightBacklightPercent = nil
+	v.Settings.Screen.NightAction = "off"
+	if err := s.Update(id, v.Revision, Patch{Settings: v.Settings}); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+}
+
+func TestBacklightControlNegotiationAndCapabilityBounds(t *testing.T) {
+	s, _ := newStore(t, nil)
+	d := report(s, testID('c'), "boot")
+	for i := 0; i < 18; i++ {
+		d.Capabilities = append(d.Capabilities, fmt.Sprintf("cap_%d", i))
+	}
+	response, err := s.Sync(d)
+	if err != nil || response.BacklightControlVersion != 1 {
+		t.Fatalf("control negotiation: %v", err)
+	}
+	for len(d.Capabilities) < 25 {
+		d.Capabilities = append(d.Capabilities, fmt.Sprintf("cap_%d", len(d.Capabilities)))
+	}
+	if _, err := s.Sync(d); err == nil {
+		t.Fatal("unbounded capabilities accepted")
 	}
 }

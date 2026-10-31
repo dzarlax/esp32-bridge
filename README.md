@@ -426,3 +426,26 @@ restored report retains the last candidate with acknowledged return command 50.
 Locally selected bright/dim endpoints are not transmitted as current hardware
 state or automatically applied settings. Existing panel reports remain read-only;
 this workflow adds no server-side calibration command or persistent-state schema.
+
+
+### Day/night brightness selection
+
+On supported HomeDash v1.0.36 devices, **Screen → Brightness** offers a temporary
+candidate slider. Observe the physical screen, choose **Use during day** or
+**Use at night**, then save the draft and schedule after restoration. Both levels
+start unset; night dimming needs both explicitly chosen. The scale is normalized,
+not measured light output. Resetting levels returns the device to its accepted
+reference. The display itself shows only preview status and a restore action.
+
+The panel coalesces slider changes, keeps one request in flight, and enables
+selection only for the latest matching command acknowledgement and a fresh known
+preview report. Offline, expired, failed or uncertain commands never select a
+level or retry automatically. The device owns the 20-second inactivity restore
+and two-minute maximum session. Persisted schedules execute locally offline.
+
+`backlight_control_version: 1` negotiates `backlight_begin` / `backlight_adjust`;
+legacy preview remains a one-shot action. Old peers retain their original
+capability limit; this Bridge accepts up to 24. No persistent settings schema
+migration is needed, but back up state before rollback because stored new command
+actions cannot be read by older versions. Deployment and real-device acceptance
+are separate from local tests.

@@ -130,6 +130,7 @@ export type Device = {
   backlight_error?: string;
 };
 export type Command = {
+  percent?: number;
   id: string;
   action: string;
   state: string;
