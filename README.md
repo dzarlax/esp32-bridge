@@ -449,3 +449,34 @@ capability limit; this Bridge accepts up to 24. No persistent settings schema
 migration is needed, but back up state before rollback because stored new command
 actions cannot be read by older versions. Deployment and real-device acceptance
 are separate from local tests.
+
+
+### Calendar diagnostics and Summary freshness
+
+Calendar responses keep their existing event-array contract and
+`X-HomeDash-Calendar-State: complete|partial`. The optional
+`X-HomeDash-Calendar-Reason` distinguishes `cache_stale` from generic incomplete
+results without overriding the upstream `complete=false` signal. A ready source
+can still have overdue cached data. All-day events keep an exclusive end date;
+DST and the configured calendar timezone determine the requested day window.
+
+The authenticated per-device `GET /api/admin/v1/devices/{id}/calendar-status`
+returns the saved selection's source states and reasons, without event content.
+The Calendar settings panel checks this explicitly and resolves names through the
+existing catalog. These GETs do not trigger provider sync or send invitations.
+Coverage and last-sync timestamps are not exposed by the current cached-events
+contract, so a generic incomplete reason stays generic.
+
+Dashboard responses add `sections` entries with `state` and, on success,
+`age_seconds` measured from the exact acquired/cached payload. Cache hits never
+reset acquisition age. Disabled services differ from failed requests and
+successful empty arrays. Existing top-level sections remain compatible.
+Health adds an explicit `present` map, including an empty object when no metrics
+exist; missing/null metrics and absent readiness scores are distinct from zero.
+HomeDash v1.0.37 uses these fields to retain previous successful values on errors
+and render loading/empty/disabled/missing states honestly.
+
+Validation covers stale/partial reasons, selected-device admin auth, DST/all-day
+mapping, cache acquisition age, missing metrics and frontend status checks. No
+persistent settings migration, credential changes or notification writes are
+introduced. Production deployment is separate from this local candidate.

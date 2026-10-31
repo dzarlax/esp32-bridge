@@ -2,10 +2,12 @@ package management
 
 import (
 	"bytes"
+	"context"
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"esp32-bridge/internal/handler"
 	"io"
 	"mime"
 	"net/http"
@@ -16,12 +18,13 @@ import (
 )
 
 type API struct {
-	catalogs      catalogCache
-	catalogClient *http.Client
-	Store         *settings.Store
-	DeviceKey     string
-	Statuses      func(string) map[string]settings.Status
-	Updates       func(string, string) map[string]any
+	catalogs       catalogCache
+	catalogClient  *http.Client
+	Store          *settings.Store
+	DeviceKey      string
+	Statuses       func(string) map[string]settings.Status
+	Updates        func(string, string) map[string]any
+	CalendarStatus func(context.Context, string) (handler.CalendarDetails, error)
 }
 
 func (a *API) Register(mux *http.ServeMux, require func(http.Handler) http.Handler) {
@@ -220,6 +223,25 @@ func (a *API) deviceRoute(w http.ResponseWriter, r *http.Request) {
 		a.catalog(w, r, id, parts[1])
 	case "settings":
 		a.deviceSettings(w, r, id)
+	case "calendar-status":
+		if r.Method != http.MethodGet {
+			method(w, "GET")
+			return
+		}
+		if !a.Store.HasDevice(id) {
+			failure(w, http.StatusNotFound, "device_not_found")
+			return
+		}
+		if a.CalendarStatus == nil {
+			failure(w, http.StatusServiceUnavailable, "calendar_status_unavailable")
+			return
+		}
+		detail, err := a.CalendarStatus(r.Context(), id)
+		if err != nil {
+			failure(w, http.StatusBadGateway, "calendar_status_unavailable")
+			return
+		}
+		output(w, http.StatusOK, detail)
 	case "actions":
 		a.deviceActions(w, r, id)
 	case "diagnostics":

@@ -97,6 +97,9 @@ export class AdminApi {
       body: "{}",
     });
   }
+  calendarStatus(deviceId: string, signal?: AbortSignal) {
+    return this.request<import("./calendar-status").CalendarDetails>(this.devicePath(deviceId, "calendar-status"), {signal});
+  }
   devices() {
     return this.request<DeviceList>("/api/admin/v1/devices");
   }

@@ -1,3 +1,4 @@
+import { CalendarStatus } from "./calendar-status";
 import { CatalogPicker } from "./catalog-picker";
 import { AdminApi, ApiError } from "./api";
 import type { CatalogItem, Favorite } from "./types";
@@ -139,6 +140,7 @@ function ServiceEditor({
           />
           <Field label={t("Календари")}>
             <CatalogPicker deviceId={props.deviceId} kind="calendars" selected={item.ids} onChange={(ids) => update("ids", ids)} />
+            <CalendarStatus key={props.deviceId} deviceId={props.deviceId} />
           </Field>
           <details><summary>{t("Дополнительно: ID вручную")}</summary>
             <Field label={t("Календари")} help={t("ID календарей, по одному на строку или через запятую.")}><textarea rows={3} value={item.ids.join("\n")} onChange={(e) => list("ids", e.target.value)} /></Field>

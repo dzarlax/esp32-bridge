@@ -2,7 +2,9 @@ package management
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"esp32-bridge/internal/handler"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -55,6 +57,9 @@ func TestMultiDeviceManagementRoutesAndNativeIdentity(t *testing.T) {
 	auth.Register(mux)
 	api := &API{
 		Store: store, DeviceKey: "device-api-key",
+		CalendarStatus: func(ctx context.Context, id string) (handler.CalendarDetails, error) {
+			return handler.CalendarDetails{Date: "2026-10-31", Complete: false, Reason: id, Sources: []handler.CalendarSource{}}, nil
+		},
 		Statuses: func(id string) map[string]settings.Status { return map[string]settings.Status{"scope": {State: id}} },
 		Updates: func(id, current string) map[string]any {
 			updatesCalls++
@@ -94,7 +99,7 @@ func TestMultiDeviceManagementRoutesAndNativeIdentity(t *testing.T) {
 	if w := call("GET", "/api/admin/v1/devices", nil, nil, "", "", "", ""); w.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated admin request=%d", w.Code)
 	}
-	for _, kind := range []string{"albums", "calendars", "entities"} {
+	for _, kind := range []string{"albums", "calendars", "entities", "calendar-status"} {
 		path := "/api/admin/v1/devices/" + strings.Repeat("a", 32) + "/" + kind
 		if w := call("GET", path, nil, nil, "", "", "device-api-key", ""); w.Code != http.StatusUnauthorized {
 			t.Fatalf("%s accepted device key without admin session: %d", kind, w.Code)
@@ -155,6 +160,13 @@ func TestMultiDeviceManagementRoutesAndNativeIdentity(t *testing.T) {
 	synced := call("POST", "/api/device/v1/sync", device, nil, "", "", "device-api-key", deviceID)
 	if synced.Code != http.StatusOK {
 		t.Fatalf("sync=%d %s", synced.Code, synced.Body.String())
+	}
+	checked := call("GET", "/api/admin/v1/devices/"+deviceID+"/calendar-status", nil, cookies, "", "", "", "")
+	if checked.Code != http.StatusOK || !strings.Contains(checked.Body.String(), deviceID) {
+		t.Fatalf("calendar scope=%d %s", checked.Code, checked.Body.String())
+	}
+	if w := call("GET", "/api/admin/v1/devices/"+strings.Repeat("b", 32)+"/calendar-status", nil, cookies, "", "", "", ""); w.Code != http.StatusNotFound {
+		t.Fatalf("unknown calendar scope=%d", w.Code)
 	}
 	var syncResponse settings.SyncResponse
 	if err := json.Unmarshal(synced.Body.Bytes(), &syncResponse); err != nil {
