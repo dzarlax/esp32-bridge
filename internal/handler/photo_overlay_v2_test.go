@@ -231,7 +231,7 @@ func TestAdaptiveReusesCalendarSnapshot(t *testing.T) {
 	calls := 0
 	client := &http.Client{Transport: overlayTransport(func(r *http.Request) (*http.Response, error) {
 		calls++
-		body := fmt.Sprintf(`{"complete":true,"items":[{"id":"1","calendar_id":"a","title":"Meeting","start":{"date_time":%q},"end":{"date_time":%q}}]}`, now.Add(time.Hour).Format(time.RFC3339), now.Add(2*time.Hour).Format(time.RFC3339))
+		body := fmt.Sprintf(`{"complete":true,"sources":[{"calendar_id":"a","status":"ready","stale":false}],"items":[{"id":"1","calendar_id":"a","title":"Meeting","start":{"date_time":%q},"end":{"date_time":%q}}]}`, now.Add(time.Hour).Format(time.RFC3339), now.Add(2*time.Hour).Format(time.RFC3339))
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
 	})}
 	svc := photoframe.New(true, photoframe.FixtureSource{}, 300, 60, 900, 32)

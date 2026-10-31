@@ -727,7 +727,7 @@ func TestOTAAttemptLimitAndAtomicEnqueueFailure(t *testing.T) {
 }
 
 func TestOTATargetMismatchAndTerminalResultImmutability(t *testing.T) {
-	s, _ := newStore(t, nil)
+	s, dir := newStore(t, nil)
 	id := testID('a')
 	register(t, s, id, "boot", "ota_install")
 	cmd, err := s.EnqueueOptions(id, "ota_install", true, nil, "2.0")
@@ -744,9 +744,32 @@ func TestOTATargetMismatchAndTerminalResultImmutability(t *testing.T) {
 	if h[0].State != "unknown" || h[0].InstalledVersion != "" {
 		t.Fatalf("wrong target: %#v", h[0])
 	}
-	d.Firmware = "2.0"
+	// An unknown attempt may retain its last known history stage, but a late
+	// report must not present it as currently active device progress.
+	d.CommandResult = nil
+	d.OTAAttemptID = cmd.ID
+	d.OTAStage = "writing"
+	d.OTAProgress = 72
 	if _, err = s.Sync(d); err != nil {
 		t.Fatal(err)
+	}
+	view, err := s.View(id, nil)
+	if err != nil || view.Device.OTAStage != "" || view.Device.OTAProgress != 0 {
+		t.Fatalf("unknown attempt still looks active: %v %#v", err, view.Device)
+	}
+	h, _ = s.OTAHistory(id)
+	if h[0].State != "unknown" || h[0].Stage != "writing" {
+		t.Fatalf("unknown attempt lost last known stage: %#v", h[0])
+	}
+	d.Firmware = "2.0"
+	d.CommandResult = &Result{ID: cmd.ID, State: "succeeded"}
+	d.OTAProgress = 73
+	if _, err = s.Sync(d); err != nil {
+		t.Fatal(err)
+	}
+	view, err = s.View(id, nil)
+	if err != nil || view.Device.OTAStage != "" || view.Device.OTAProgress != 0 {
+		t.Fatalf("terminal attempt still looks active: %v %#v", err, view.Device)
 	}
 	d.CommandResult.State = "failed"
 	if _, err = s.Sync(d); err != nil {
@@ -755,6 +778,67 @@ func TestOTATargetMismatchAndTerminalResultImmutability(t *testing.T) {
 	h, _ = s.OTAHistory(id)
 	if h[0].State != "succeeded" || h[0].InstalledVersion != "2.0" {
 		t.Fatalf("terminal result changed: %#v", h[0])
+	}
+	// Old persisted terminal history may still contain a stage from before this fix.
+	s.mu.Lock()
+	p := s.state.Profiles[id]
+	p.OTAHistory[0].Stage = "writing"
+	s.state.Profiles[id] = p
+	if err := s.persist(s.state); err != nil {
+		s.mu.Unlock()
+		t.Fatal(err)
+	}
+	s.mu.Unlock()
+	backup := s.path + ".backup"
+	if err := os.Rename(s.path, backup); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(s.path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.OTAHistory(id); err == nil {
+		t.Fatal("expected history normalization persistence failure")
+	}
+	s.mu.Lock()
+	stageAfterFailure := s.state.Profiles[id].OTAHistory[0].Stage
+	s.mu.Unlock()
+	if stageAfterFailure != "writing" {
+		t.Fatalf("failed normalization changed in-memory history: %q", stageAfterFailure)
+	}
+	if err := os.Remove(s.path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(backup, s.path); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := New(dir, testValues(), map[string]string{"health_api_key": "default-health"}, "https://bridge.example.test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err = restarted.OTAHistory(id)
+	if err != nil || h[0].State != "succeeded" || h[0].Stage != "" {
+		t.Fatalf("stale successful stage survived restart: %v %#v", err, h)
+	}
+	register(t, restarted, id, "boot2", "ota_install")
+	failedCmd, err := restarted.EnqueueOptions(id, "ota_install", true, nil, "3.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	failedReport := report(restarted, id, "boot2", "ota_install")
+	failedReport.CommandResult = &Result{ID: failedCmd.ID, State: "failed"}
+	failedReport.OTAAttemptID = failedCmd.ID
+	failedReport.OTAStage = "writing"
+	failedReport.OTAProgress = 80
+	if _, err = restarted.Sync(failedReport); err != nil {
+		t.Fatal(err)
+	}
+	view, err = restarted.View(id, nil)
+	if err != nil || view.Device.OTAStage != "" || view.Device.OTAProgress != 0 {
+		t.Fatalf("failed attempt still looks active: %v %#v", err, view.Device)
+	}
+	h, err = restarted.OTAHistory(id)
+	if err != nil || h[0].State != "failed" || h[0].Stage != "writing" {
+		t.Fatalf("failed attempt lost last known stage: %v %#v", err, h)
 	}
 }
 

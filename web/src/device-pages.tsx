@@ -188,7 +188,7 @@ export function UpdatesPage({
                 {item.at && <time>{new Date(item.at).toLocaleString(dateLocale(locale))}</time>}
                 {item.previous_version && <small>{t("Предыдущая версия")}: {item.previous_version}</small>}
                 {item.installed_version && <small>{t("Подтверждённая версия")}: {item.installed_version}</small>}
-                {item.stage && <small>{t(({ checking: "Проверка", downloading: "Загрузка", verifying: "Проверка файла", writing: "Запись", rebooting: "Перезагрузка" } as Record<string, string>)[item.stage] ?? "Этап неизвестен")}</small>}
+                {otaStageText(item) && <small>{otaStageIsHistorical(item.state) && `${t("Последний известный этап")}: `}{t(otaStageText(item)!)}</small>}
                 {item.error && <small>{t(({ ota_check_failed: "Ошибка проверки обновлений", no_update: "Обновление недоступно", download_failed: "Ошибка загрузки", validation_failed: "Ошибка проверки файла", flash_failed: "Ошибка записи", device_error: "Ошибка устройства", unknown: "Причина неизвестна" } as Record<string, string>)[item.error] ?? "Причина неизвестна")}</small>}
               </div>
             ))}
@@ -229,6 +229,11 @@ export function shouldShowCommandError(command: Command, online: boolean, curren
     hasCurrentFirmwareObservation(online, current, command.target_version || "")
   ));
 }
+export function otaStageText(item: { state: string; stage?: string }): string | null {
+  if (!item.stage || item.state === "succeeded") return null;
+  return ({ checking: "Проверка", downloading: "Загрузка", verifying: "Проверка файла", writing: "Запись", rebooting: "Перезагрузка" } as Record<string, string>)[item.stage] ?? "Этап неизвестен";
+}
+export function otaStageIsHistorical(state: string) { return state === "failed" || state === "unknown"; }
 function CommandCard({ command, online = false, currentVersion = "" }: { command: Command; online?: boolean; currentVersion?: string }) {
   const t = useT();
   const { locale } = useLocale();

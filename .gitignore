@@ -11,3 +11,5 @@ web/tsconfig.tsbuildinfo
 **/*.tsbuildinfo
 
 /admin-password
+
+tools/__pycache__/

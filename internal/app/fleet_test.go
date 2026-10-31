@@ -56,6 +56,9 @@ func TestUnregisteredDeviceCanRecoverThroughAuthenticatedOTA(t *testing.T) {
 			if got := request("GET", queryPath, deviceA, ""); got.Code != http.StatusUnauthorized {
 				t.Fatalf("query-string key accepted for bootstrap OTA: %d", got.Code)
 			}
+			if got := request("GET", queryPath, deviceA, cfg.APIKey); got.Code != http.StatusBadRequest || !strings.Contains(got.Body.String(), "query_key_not_supported") {
+				t.Fatalf("header plus URL credential accepted for bootstrap OTA: %d", got.Code)
+			}
 			if got := request("GET", path, "invalid", cfg.APIKey); got.Code != http.StatusBadRequest {
 				t.Fatalf("invalid ID = %d", got.Code)
 			}

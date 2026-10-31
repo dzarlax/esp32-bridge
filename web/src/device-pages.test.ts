@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { hasCurrentFirmwareObservation, sameFirmwareVersion, shouldShowCommandError } from "./device-pages";
+import { hasCurrentFirmwareObservation, otaStageIsHistorical, otaStageText, sameFirmwareVersion, shouldShowCommandError } from "./device-pages";
+
+describe("OTA stage presentation", () => {
+  it("hides stale progress stages after success and labels retained outcomes as historical", () => {
+    expect(otaStageText({ state: "succeeded", stage: "writing" })).toBeNull();
+    expect(otaStageText({ state: "unknown", stage: "writing" })).toBe("Запись");
+    expect(otaStageIsHistorical("unknown")).toBe(true);
+    expect(otaStageIsHistorical("failed")).toBe(true);
+    expect(otaStageText({ state: "failed", stage: "new-stage" })).toBe("Этап неизвестен");
+    expect(otaStageText({ state: "accepted", stage: "rebooting" })).toBe("Перезагрузка");
+  });
+});
 
 describe("firmware version observations", () => {
   it("normalizes only whitespace and an optional v prefix", () => {

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -85,11 +86,17 @@ func (h *Handler) calendarPlatformEnabled() bool {
 
 func (h *Handler) requireAuth(w http.ResponseWriter, r *http.Request) bool {
 	key := r.Header.Get("X-API-Key")
-	if key == "" {
-		key = r.URL.Query().Get("key")
-	}
-	if key != h.apiKey {
+	if key == "" || h.apiKey == "" || len(r.Header.Values("X-API-Key")) != 1 || subtle.ConstantTimeCompare([]byte(key), []byte(h.apiKey)) != 1 {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return false
+	}
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		http.Error(w, `{"error":"invalid_query"}`, http.StatusBadRequest)
+		return false
+	}
+	if _, supplied := query["key"]; supplied {
+		http.Error(w, `{"error":"query_key_not_supported"}`, http.StatusBadRequest)
 		return false
 	}
 	return true
@@ -419,6 +426,16 @@ type calendarPlatformEvent struct {
 	End        calendarPlatformEventTime `json:"end"`
 }
 
+type calendarPlatformSource struct {
+	CalendarID       string  `json:"calendar_id"`
+	Status           string  `json:"status"`
+	Stale            *bool   `json:"stale"`
+	LastSuccessAt    *string `json:"last_success_at"`
+	NextSyncAt       *string `json:"next_sync_at"`
+	CoverageComplete *bool   `json:"coverage_complete"`
+	ErrorCode        string  `json:"error_code"`
+}
+
 func (h *Handler) fetchCalendarPlatformRaw(r *http.Request, dayStart, dayEnd time.Time, strict bool, completeness ...*bool) ([]calendarPlatformEvent, error) {
 	return h.fetchCalendarPlatformRawDetailed(r, dayStart, dayEnd, strict, nil, completeness...)
 }
@@ -448,29 +465,38 @@ func (h *Handler) fetchCalendarPlatformRawDetailed(r *http.Request, dayStart, da
 		return nil, fmt.Errorf("Calendar Platform HTTP %d", resp.StatusCode)
 	}
 	var payload struct {
-		Items    []calendarPlatformEvent `json:"items"`
-		Complete bool                    `json:"complete"`
-		Sources  []struct {
-			CalendarID string `json:"calendar_id"`
-			Status     string `json:"status"`
-			Stale      *bool  `json:"stale"`
-		} `json:"sources"`
+		Items    []calendarPlatformEvent  `json:"items"`
+		Complete bool                     `json:"complete"`
+		Sources  []calendarPlatformSource `json:"sources"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload); err != nil {
 		return nil, err
 	}
+	selectedIDs := make(map[string]struct{}, len(h.calendarPlatformIDs))
+	sourceByID := make(map[string]calendarPlatformSource, len(payload.Sources))
+	for _, id := range h.calendarPlatformIDs {
+		selectedIDs[id] = struct{}{}
+	}
+	for _, source := range payload.Sources {
+		if _, selected := selectedIDs[source.CalendarID]; selected {
+			if _, exists := sourceByID[source.CalendarID]; !exists {
+				sourceByID[source.CalendarID] = source
+			}
+		}
+	}
+	effectiveComplete := payload.Complete
+	for id := range selectedIDs {
+		source, found := sourceByID[id]
+		if !found || source.Status != "ready" || source.Stale == nil || *source.Stale || (source.CoverageComplete != nil && !*source.CoverageComplete) || source.ErrorCode != "" {
+			effectiveComplete = false
+		}
+	}
 	if details != nil {
-		details.Complete = payload.Complete
+		details.Complete = effectiveComplete
 		details.Reason = "complete"
 		seen := map[string]bool{}
 		for _, source := range payload.Sources {
-			selected := false
-			for _, id := range h.calendarPlatformIDs {
-				if id == source.CalendarID {
-					selected = true
-					break
-				}
-			}
+			_, selected := selectedIDs[source.CalendarID]
 			if !selected || seen[source.CalendarID] {
 				continue
 			}
@@ -489,9 +515,36 @@ func (h *Handler) fetchCalendarPlatformRawDetailed(r *http.Request, dayStart, da
 			} else if *source.Stale {
 				reason = "cache_stale"
 			}
-			details.Sources = append(details.Sources, CalendarSource{ID: source.CalendarID, State: source.Status, Stale: source.Stale, Reason: reason})
+			reasons := []string{}
+			if reason != "ready" {
+				reasons = append(reasons, reason)
+			}
+			if source.CoverageComplete != nil && !*source.CoverageComplete {
+				reasons = append(reasons, "coverage_incomplete")
+				if reason == "ready" {
+					reason = "coverage_incomplete"
+				}
+			}
+			if safeCalendarErrorCode(source.ErrorCode) != "" {
+				reasons = append(reasons, "source_error")
+				if reason == "ready" {
+					reason = "source_error"
+				}
+			}
+			sourceReasonList := uniqueStrings(reasons)
+			details.Sources = append(details.Sources, CalendarSource{
+				ID: source.CalendarID, State: source.Status, Stale: source.Stale,
+				LastSuccessAt: safeCalendarTimestamp(source.LastSuccessAt), NextSyncAt: safeCalendarTimestamp(source.NextSyncAt),
+				CoverageComplete: source.CoverageComplete, ErrorCode: safeCalendarErrorCode(source.ErrorCode),
+				Reason: reason, Reasons: sourceReasonList,
+			})
 		}
-		if !payload.Complete {
+		for _, id := range h.calendarPlatformIDs {
+			if !seen[id] {
+				details.Sources = append(details.Sources, CalendarSource{ID: id, State: "unknown", Reason: "unknown"})
+			}
+		}
+		if !effectiveComplete {
 			details.Reason = "incomplete"
 			allReady := len(seen) == len(h.calendarPlatformIDs)
 			stale := false
@@ -506,21 +559,18 @@ func (h *Handler) fetchCalendarPlatformRawDetailed(r *http.Request, dayStart, da
 	}
 	for _, result := range completeness {
 		if result != nil {
-			*result = payload.Complete
+			*result = effectiveComplete
 		}
 	}
-	if !payload.Complete {
+	if !effectiveComplete {
 		log.Printf("[calendar] Calendar Platform returned a partial result")
 	}
-	if strict && !payload.Complete {
+	if strict && !effectiveComplete {
 		ready := map[string]bool{}
 		for _, source := range payload.Sources {
-			if source.Status == "ready" && source.Stale != nil && !*source.Stale {
+			if _, selected := selectedIDs[source.CalendarID]; selected && source.Status == "ready" && source.Stale != nil && !*source.Stale && source.ErrorCode == "" && (source.CoverageComplete == nil || *source.CoverageComplete) {
 				ready[source.CalendarID] = true
 			}
-		}
-		if len(ready) == 0 {
-			return nil, fmt.Errorf("calendar source incomplete")
 		}
 		items := make([]calendarPlatformEvent, 0, len(payload.Items))
 		for _, item := range payload.Items {

@@ -11,6 +11,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -389,12 +390,28 @@ func (a *API) deviceDiagnostics(w http.ResponseWriter, r *http.Request, id strin
 }
 
 func (a *API) authorizedDevice(r *http.Request) bool {
-	return a.DeviceKey != "" && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-API-Key")), []byte(a.DeviceKey)) == 1
+	return a.DeviceKey != "" && len(r.Header.Values("X-API-Key")) == 1 && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-API-Key")), []byte(a.DeviceKey)) == 1
+}
+
+func validDeviceQuery(w http.ResponseWriter, r *http.Request) bool {
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		failure(w, http.StatusBadRequest, "invalid_query")
+		return false
+	}
+	if _, supplied := query["key"]; supplied {
+		failure(w, http.StatusBadRequest, "query_key_not_supported")
+		return false
+	}
+	return true
 }
 
 func (a *API) sync(w http.ResponseWriter, r *http.Request) {
 	if !a.authorizedDevice(r) {
 		failure(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if !validDeviceQuery(w, r) {
 		return
 	}
 	if r.Method != http.MethodPost {
@@ -432,6 +449,9 @@ func (a *API) sync(w http.ResponseWriter, r *http.Request) {
 func (a *API) probe(w http.ResponseWriter, r *http.Request) {
 	if !a.authorizedDevice(r) {
 		failure(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if !validDeviceQuery(w, r) {
 		return
 	}
 	if r.Method != http.MethodGet {

@@ -30,7 +30,7 @@ func TestPhotoOverlayContextAndIsolation(t *testing.T) {
 		if failed {
 			return nil, fmt.Errorf("offline")
 		}
-		body := fmt.Sprintf(`{"complete":true,"items":[{"id":"1","calendar_id":"a","title":"Встреча","start":{"date_time":%q},"end":{"date_time":%q}}]}`, now.Add(-time.Minute).Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339))
+		body := fmt.Sprintf(`{"complete":true,"sources":[{"calendar_id":"a","status":"ready","stale":false}],"items":[{"id":"1","calendar_id":"a","title":"Встреча","start":{"date_time":%q},"end":{"date_time":%q}}]}`, now.Add(-time.Minute).Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339))
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
 	})}
 	h := New(fetcher.NewOrchestrator(nil, cache.New(), time.Second), "secret", "", "", nil, nil, client)
@@ -106,7 +106,7 @@ func TestPhotoEventSelectionAndFailures(t *testing.T) {
 		if got := r.URL.Query()["calendar_id"]; len(got) != 1 || got[0] != "a" {
 			t.Errorf("calendar filter %v", got)
 		}
-		body := fmt.Sprintf(`{"complete":true,"items":[{"id":"later","calendar_id":"a","title":"Later","start":{"date_time":%q},"end":{"date_time":%q}},{"id":"ongoing","calendar_id":"a","title":"Ongoing","start":{"date_time":%q},"end":{"date_time":%q}},{"id":"all","calendar_id":"a","title":"All day","start":{"date":"2026-10-25"},"end":{"date":"2026-10-26"}},{"id":"foreign","calendar_id":"foreign","title":"Foreign","start":{"date_time":"2026-10-24T20:00:00Z"},"end":{"date_time":"2026-10-25T02:00:00Z"}},{"id":"cancel","calendar_id":"a","status":"cancelled","title":"Cancelled","start":{"date_time":"2026-10-24T19:00:00Z"},"end":{"date_time":"2026-10-25T02:00:00Z"}}]}`, now.Add(time.Hour).Format(time.RFC3339), now.Add(2*time.Hour).Format(time.RFC3339), now.Add(-2*time.Hour).Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339))
+		body := fmt.Sprintf(`{"complete":true,"sources":[{"calendar_id":"a","status":"ready","stale":false}],"items":[{"id":"later","calendar_id":"a","title":"Later","start":{"date_time":%q},"end":{"date_time":%q}},{"id":"ongoing","calendar_id":"a","title":"Ongoing","start":{"date_time":%q},"end":{"date_time":%q}},{"id":"all","calendar_id":"a","title":"All day","start":{"date":"2026-10-25"},"end":{"date":"2026-10-26"}},{"id":"foreign","calendar_id":"foreign","title":"Foreign","start":{"date_time":"2026-10-24T20:00:00Z"},"end":{"date_time":"2026-10-25T02:00:00Z"}},{"id":"cancel","calendar_id":"a","status":"cancelled","title":"Cancelled","start":{"date_time":"2026-10-24T19:00:00Z"},"end":{"date_time":"2026-10-25T02:00:00Z"}}]}`, now.Add(time.Hour).Format(time.RFC3339), now.Add(2*time.Hour).Format(time.RFC3339), now.Add(-2*time.Hour).Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339))
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
 	})}
 	h := New(nil, "", "", "", nil, nil, client)
@@ -175,7 +175,7 @@ func TestPhotoEventExpiresAtStart(t *testing.T) {
 	now := time.Now().UTC()
 	start := now.Add(2 * time.Minute).Truncate(time.Second)
 	client := &http.Client{Transport: overlayTransport(func(r *http.Request) (*http.Response, error) {
-		body := fmt.Sprintf(`{"complete":true,"items":[{"id":"1","calendar_id":"a","title":"Upcoming","start":{"date_time":%q},"end":{"date_time":%q}}]}`, start.Format(time.RFC3339), start.Add(time.Hour).Format(time.RFC3339))
+		body := fmt.Sprintf(`{"complete":true,"sources":[{"calendar_id":"a","status":"ready","stale":false}],"items":[{"id":"1","calendar_id":"a","title":"Upcoming","start":{"date_time":%q},"end":{"date_time":%q}}]}`, start.Format(time.RFC3339), start.Add(time.Hour).Format(time.RFC3339))
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
 	})}
 	h := New(nil, "secret", "", "", nil, nil, client)
@@ -248,7 +248,7 @@ func TestPhotoPartialCalendarKeepsFreshSources(t *testing.T) {
 	now := time.Now().UTC()
 	mode := "ready"
 	client := &http.Client{Transport: overlayTransport(func(r *http.Request) (*http.Response, error) {
-		body := fmt.Sprintf(`{"complete":false,"sources":[{"calendar_id":"a","status":%q,"stale":false},{"calendar_id":"b","status":"parked","stale":true},{"calendar_id":"c","status":"ready","stale":true}],"items":[{"id":"fresh","calendar_id":"a","title":"Fresh","start":{"date_time":%q},"end":{"date_time":%q}},{"id":"parked","calendar_id":"b","title":"Parked","start":{"date_time":%q},"end":{"date_time":%q}},{"id":"stale","calendar_id":"c","title":"Stale","start":{"date_time":%q},"end":{"date_time":%q}}]}`, mode, now.Add(time.Hour).Format(time.RFC3339), now.Add(2*time.Hour).Format(time.RFC3339), now.Add(time.Minute).Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339), now.Add(2*time.Minute).Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339))
+		body := fmt.Sprintf(`{"complete":false,"sources":[{"calendar_id":"a","status":%q,"stale":false},{"calendar_id":"b","status":"ready","stale":false,"coverage_complete":false},{"calendar_id":"c","status":"ready","stale":true,"coverage_complete":true}],"items":[{"id":"fresh","calendar_id":"a","title":"Fresh","start":{"date_time":%q},"end":{"date_time":%q}},{"id":"partial-window","calendar_id":"b","title":"Partial window","start":{"date_time":%q},"end":{"date_time":%q}},{"id":"stale","calendar_id":"c","title":"Stale","start":{"date_time":%q},"end":{"date_time":%q}}]}`, mode, now.Add(time.Hour).Format(time.RFC3339), now.Add(2*time.Hour).Format(time.RFC3339), now.Add(time.Minute).Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339), now.Add(2*time.Minute).Format(time.RFC3339), now.Add(time.Hour).Format(time.RFC3339))
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
 	})}
 	h := New(nil, "", "", "", nil, nil, client)
@@ -268,7 +268,131 @@ func TestPhotoPartialCalendarKeepsFreshSources(t *testing.T) {
 		}
 	}
 	mode = "syncing"
-	if _, err := h.nextPhotoEvent(req, now); err == nil {
-		t.Fatal("no fresh sources mistaken for empty calendar")
+	if event, err := h.nextPhotoEvent(req, now); err != nil || event != nil {
+		t.Fatalf("no eligible fresh events should hide the card: event=%+v err=%v", event, err)
+	}
+}
+
+func TestPhotoPartialCompatibilityAndInconsistentCompletePayload(t *testing.T) {
+	now := time.Now().UTC()
+	for _, tc := range []struct {
+		name, selected, body string
+		wantItems            int
+		wantComplete         bool
+	}{
+		{
+			name:      "legacy missing coverage remains eligible",
+			selected:  `"a"`,
+			body:      fmt.Sprintf(`{"complete":false,"sources":[{"calendar_id":"a","status":"ready","stale":false}],"items":[{"id":"legacy","calendar_id":"a","title":"Legacy","start":{"date_time":%q},"end":{"date_time":%q}}]}`, now.Add(time.Hour).Format(time.RFC3339), now.Add(2*time.Hour).Format(time.RFC3339)),
+			wantItems: 1,
+		},
+		{
+			name:         "legacy missing coverage remains complete when all source metadata is ready",
+			selected:     `"a"`,
+			body:         fmt.Sprintf(`{"complete":true,"sources":[{"calendar_id":"a","status":"ready","stale":false}],"items":[{"id":"legacy","calendar_id":"a","title":"Legacy","start":{"date_time":%q},"end":{"date_time":%q}}]}`, now.Add(time.Hour).Format(time.RFC3339), now.Add(2*time.Hour).Format(time.RFC3339)),
+			wantItems:    1,
+			wantComplete: true,
+		},
+		{
+			name:      "complete claim downgraded for coverage false",
+			selected:  `"a"`,
+			body:      fmt.Sprintf(`{"complete":true,"sources":[{"calendar_id":"a","status":"ready","stale":false,"coverage_complete":false}],"items":[{"id":"partial","calendar_id":"a","title":"Partial","start":{"date_time":%q},"end":{"date_time":%q}}]}`, now.Add(time.Hour).Format(time.RFC3339), now.Add(2*time.Hour).Format(time.RFC3339)),
+			wantItems: 0,
+		},
+		{
+			name:      "complete claim downgraded when a selected source is missing",
+			selected:  `"a","b"`,
+			body:      fmt.Sprintf(`{"complete":true,"sources":[{"calendar_id":"a","status":"ready","stale":false}],"items":[{"id":"legacy","calendar_id":"a","title":"Legacy","start":{"date_time":%q},"end":{"date_time":%q}}]}`, now.Add(time.Hour).Format(time.RFC3339), now.Add(2*time.Hour).Format(time.RFC3339)),
+			wantItems: 1,
+		},
+		{
+			name:     "complete claim downgraded for stale source",
+			selected: `"a"`,
+			body:     fmt.Sprintf(`{"complete":true,"sources":[{"calendar_id":"a","status":"ready","stale":true}],"items":[{"id":"stale","calendar_id":"a","title":"Stale","start":{"date_time":%q},"end":{"date_time":%q}}]}`, now.Add(time.Hour).Format(time.RFC3339), now.Add(2*time.Hour).Format(time.RFC3339)),
+		},
+		{
+			name:     "complete claim downgraded for unknown freshness",
+			selected: `"a"`,
+			body:     fmt.Sprintf(`{"complete":true,"sources":[{"calendar_id":"a","status":"ready"}],"items":[{"id":"unknown","calendar_id":"a","title":"Unknown","start":{"date_time":%q},"end":{"date_time":%q}}]}`, now.Add(time.Hour).Format(time.RFC3339), now.Add(2*time.Hour).Format(time.RFC3339)),
+		},
+		{
+			name:     "complete claim downgraded for pending source",
+			selected: `"a"`,
+			body:     fmt.Sprintf(`{"complete":true,"sources":[{"calendar_id":"a","status":"pending","stale":false}],"items":[{"id":"pending","calendar_id":"a","title":"Pending","start":{"date_time":%q},"end":{"date_time":%q}}]}`, now.Add(time.Hour).Format(time.RFC3339), now.Add(2*time.Hour).Format(time.RFC3339)),
+		},
+		{
+			name:      "complete claim downgraded for safe error code",
+			selected:  `"a"`,
+			body:      fmt.Sprintf(`{"complete":true,"sources":[{"calendar_id":"a","status":"ready","stale":false,"error_code":"auth"}],"items":[{"id":"auth","calendar_id":"a","title":"Auth","start":{"date_time":%q},"end":{"date_time":%q}}]}`, now.Add(time.Hour).Format(time.RFC3339), now.Add(2*time.Hour).Format(time.RFC3339)),
+			wantItems: 0,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &http.Client{Transport: overlayTransport(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(tc.body)), Header: http.Header{}}, nil
+			})}
+			h := New(nil, "", "", "", nil, nil, client)
+			ids := []string{"a"}
+			if tc.selected == `"a","b"` {
+				ids = []string{"a", "b"}
+			}
+			h.SetCalendarPlatform("https://calendar.test", "token", ids, "UTC")
+			details := &CalendarDetails{}
+			items, err := h.fetchCalendarPlatformRawDetailed(httptest.NewRequest(http.MethodGet, "/", nil), now, now.Add(24*time.Hour), true, details)
+			if err != nil || details.Complete != tc.wantComplete || len(items) != tc.wantItems {
+				t.Fatalf("complete=%t items=%#v err=%v", details.Complete, items, err)
+			}
+			if tc.wantItems > 0 && items[0].partial == tc.wantComplete {
+				t.Fatal("partial-result caption marker was not retained")
+			}
+			if len(details.Sources) != len(ids) {
+				t.Fatalf("missing selected source not represented as unknown: %+v", details.Sources)
+			}
+		})
+	}
+}
+
+func TestPhotoPartialCalendarRequiresKnownCoverageAndClearsOldCard(t *testing.T) {
+	now := time.Now().UTC()
+	client := &http.Client{Transport: overlayTransport(func(r *http.Request) (*http.Response, error) {
+		body := fmt.Sprintf(`{"complete":false,"sources":[{"calendar_id":"a","status":"ready","stale":false,"coverage_complete":false}],"items":[{"id":"partial","calendar_id":"a","title":"Partial","start":{"date_time":%q},"end":{"date_time":%q}}]}`, now.Add(time.Hour).Format(time.RFC3339), now.Add(2*time.Hour).Format(time.RFC3339))
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
+	})}
+	h := New(nil, "secret", "", "", nil, nil, client)
+	h.SetCalendarPlatform("https://calendar.test", "token", []string{"a"}, "UTC")
+	h.SetPhotoOverlaySettings(settings.Screen{Locale: "ru", Timezone: "UTC"}, settings.Photos{}, false, true)
+	h.overlay.eventData = &photoEvent{title: "Old event", start: now.Add(time.Hour), end: now.Add(2 * time.Hour)}
+	h.overlay.eventExpiry = now.Add(5 * time.Minute)
+	h.overlay.lastCalendar = now.Add(-time.Minute)
+	req := httptest.NewRequest(http.MethodGet, "/api/photo-frame/v1/context", nil)
+	req.Header.Set("X-API-Key", "secret")
+	req.Header.Set("X-Device-ID", strings.Repeat("a", 32))
+	w := httptest.NewRecorder()
+	h.PhotoContext(w, req)
+	var response overlayContext
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode context: %v (%s)", err, w.Body.String())
+	}
+	for _, block := range response.Blocks {
+		if block.Kind == "event" {
+			t.Fatal("partial-coverage event card was exposed")
+		}
+	}
+	if h.overlay.eventData != nil || h.overlay.event != nil {
+		t.Fatal("old event card was retained after no eligible fresh events")
+	}
+	sceneRequest := httptest.NewRequest(http.MethodGet, "/api/photo-frame/v3/context", nil)
+	sceneRequest.Header.Set("X-API-Key", "secret")
+	sceneRequest.Header.Set("X-Device-ID", strings.Repeat("a", 32))
+	sceneRecorder := httptest.NewRecorder()
+	h.PhotoContextV3(sceneRecorder, sceneRequest)
+	var scene sceneContext
+	if err := json.Unmarshal(sceneRecorder.Body.Bytes(), &scene); err != nil {
+		t.Fatalf("decode scene: %v (%s)", err, sceneRecorder.Body.String())
+	}
+	for _, block := range scene.Blocks {
+		if block.Kind == "event" {
+			t.Fatal("partial-coverage event scene was exposed")
+		}
 	}
 }
