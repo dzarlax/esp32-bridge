@@ -303,14 +303,13 @@ describe("settings screen field interactions", () => {
     expect(screen.getByRole("switch", { name: event })).toBeTruthy();
   });
 
-  it("gates brightness and sends a bounded preview without editing settings", () => {
+  it("keeps unsupported brightness unavailable without editing settings", () => {
     const props = pageProps();
     props.envelope.device.capabilities.push("backlight_preview", "backlight_restore");
     render(<ScreenPage {...props} />);
-    expect((screen.getByLabelText("Дневная яркость") as HTMLInputElement).disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText("Яркость проверки"), { target: { value: "30" } });
-    fireEvent.click(screen.getByRole("button", { name: "Проверить на 20 секунд" }));
-    expect(props.runAction).toHaveBeenCalledWith("backlight_preview", 30);
+    expect(screen.queryByLabelText("Подбор яркости")).toBeNull();
+    expect(screen.getByText("Яркость недоступна до проверки и калибровки подсветки устройства.")).toBeTruthy();
+    expect(props.runAction).not.toHaveBeenCalled();
     expect(props.edit).not.toHaveBeenCalled();
   });
 

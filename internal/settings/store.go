@@ -472,8 +472,13 @@ func (s *Store) Update(id string, revision uint64, p Patch) error {
 			return errors.New("favorite not configured")
 		}
 	}
-	if (!equalIntPtr(p.Settings.Screen.BacklightPercent, profile.Settings.Screen.BacklightPercent) || !equalIntPtr(p.Settings.Screen.NightBacklightPercent, profile.Settings.Screen.NightBacklightPercent) || p.Settings.Screen.NightAction != profile.Settings.Screen.NightAction) && !slices.Contains(s.devices[id].Capabilities, "backlight_brightness") {
+	brightnessChanged := !equalIntPtr(p.Settings.Screen.BacklightPercent, profile.Settings.Screen.BacklightPercent) || !equalIntPtr(p.Settings.Screen.NightBacklightPercent, profile.Settings.Screen.NightBacklightPercent) || p.Settings.Screen.NightAction != profile.Settings.Screen.NightAction
+	clearingBrightness := p.Settings.Screen.BacklightPercent == nil && p.Settings.Screen.NightBacklightPercent == nil && p.Settings.Screen.NightAction != "dim"
+	if brightnessChanged && !clearingBrightness && !slices.Contains(s.devices[id].Capabilities, "backlight_brightness") {
 		return ErrUnavailable
+	}
+	if brightnessChanged && s.devices[id].BacklightReport != nil && s.devices[id].BacklightReport.Phase == "preview" {
+		return ErrBusy
 	}
 	if !sameSharedURLs(p.Settings, s.state.Connections) {
 		return ErrSharedURLMismatch
@@ -807,10 +812,10 @@ func (s *Store) Sync(d Device) (SyncResponse, error) {
 	if d.AppliedLocale != "" && !validLocale(d.AppliedLocale) {
 		return SyncResponse{}, errors.New("invalid applied locale")
 	}
-	if !validBridgeID(d.DeviceID) || d.Firmware == "" || d.BootID == "" || len(d.Firmware) > 32 || len(d.BootID) > 64 || len(d.BridgeID) > 32 || len(d.SSID) > 32 || len(d.IP) > 64 || len(d.Capabilities) > 16 || len(d.Model) > 80 || len(d.AvailableVersion) > 32 || d.Width < 0 || d.Width > 10000 || d.Height < 0 || d.Height > 10000 || d.OTAProgress < 0 || d.OTAProgress > 100 {
+	if !validBridgeID(d.DeviceID) || d.Firmware == "" || d.BootID == "" || len(d.Firmware) > 32 || len(d.BootID) > 64 || len(d.BridgeID) > 32 || len(d.SSID) > 32 || len(d.IP) > 64 || len(d.Capabilities) > 24 || len(d.Model) > 80 || len(d.AvailableVersion) > 32 || d.Width < 0 || d.Width > 10000 || d.Height < 0 || d.Height > 10000 || d.OTAProgress < 0 || d.OTAProgress > 100 {
 		return SyncResponse{}, errors.New("invalid device report")
 	}
-	if !cleanText(d.Firmware, 32) || !cleanText(d.BootID, 64) || (d.BridgeID != "" && !validBridgeID(d.BridgeID)) || !cleanText(d.SSID, 32) || !cleanText(d.IP, 64) || !cleanText(d.Model, 80) || !cleanText(d.AvailableVersion, 32) || !validIDs(d.Capabilities, 16) {
+	if !cleanText(d.Firmware, 32) || !cleanText(d.BootID, 64) || (d.BridgeID != "" && !validBridgeID(d.BridgeID)) || !cleanText(d.SSID, 32) || !cleanText(d.IP, 64) || !cleanText(d.Model, 80) || !cleanText(d.AvailableVersion, 32) || !validIDs(d.Capabilities, 24) {
 		return SyncResponse{}, errors.New("invalid device report")
 	}
 	if d.CommandResult != nil {
@@ -970,8 +975,8 @@ func (s *Store) Sync(d Device) (SyncResponse, error) {
 		tz = "CET-1CEST,M3.5.0,M10.5.0/3"
 	}
 	response := SyncResponse{
-		BacklightReportVersion: 1,
-		DeviceID:               d.DeviceID, BridgeID: s.state.BridgeID, Revision: profile.Revision,
+		BacklightReportVersion: 1, BacklightControlVersion: 1,
+		DeviceID: d.DeviceID, BridgeID: s.state.BridgeID, Revision: profile.Revision,
 		Preferences: Preferences{Screen: values.Screen, Home: HomePreferences{Favorites: append([]Favorite{}, values.Services["home"].Favorites...)}, Photos: values.Photos, Visible: visible, POSIXTimezone: tz, SettingsURL: s.baseURL + "/settings/?device_id=" + d.DeviceID},
 	}
 	if (!scopeMatches || d.AppliedRevision != profile.Revision) && slices.Contains(d.Capabilities, "network") && len(profile.Network) > 0 {
@@ -987,7 +992,7 @@ func (s *Store) Enqueue(id, action string, confirm bool) (*Command, error) {
 	return s.EnqueueOptions(id, action, confirm, nil, "")
 }
 func (s *Store) EnqueueOptions(id, action string, confirm bool, percent *int, targetVersion string) (*Command, error) {
-	if action == "backlight_preview" {
+	if action == "backlight_preview" || action == "backlight_adjust" || action == "backlight_begin" {
 		if percent == nil || *percent < 10 || *percent > 100 {
 			return nil, errors.New("invalid percent")
 		}
@@ -1001,7 +1006,7 @@ func (s *Store) EnqueueOptions(id, action string, confirm bool, percent *int, ta
 		return nil, ErrDeviceNotFound
 	}
 	switch action {
-	case "photo_start", "ota_check", "backlight_preview", "backlight_restore":
+	case "photo_start", "ota_check", "backlight_preview", "backlight_adjust", "backlight_begin", "backlight_restore":
 	case "restart", "ota_install", "reset":
 		if !confirm {
 			return nil, errors.New("confirmation required")

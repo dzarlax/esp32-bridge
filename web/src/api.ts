@@ -160,7 +160,7 @@ export class AdminApi {
   }
   action(
     deviceId: string,
-    action: "photo_start" | "restart" | "ota_check" | "ota_install" | "reset" | "backlight_preview" | "backlight_restore",
+    action: "photo_start" | "restart" | "ota_check" | "ota_install" | "reset" | "backlight_preview" | "backlight_adjust" | "backlight_begin" | "backlight_restore",
     percent?: number,
   ) {
     const confirm = ["restart", "ota_install", "reset"].includes(action)

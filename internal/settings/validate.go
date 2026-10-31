@@ -186,7 +186,7 @@ func validCommand(c *Command) bool {
 		return false
 	}
 	switch c.Action {
-	case "photo_start", "restart", "ota_check", "ota_install", "reset", "backlight_preview", "backlight_restore":
+	case "photo_start", "restart", "ota_check", "ota_install", "reset", "backlight_preview", "backlight_adjust", "backlight_begin", "backlight_restore":
 	default:
 		return false
 	}
@@ -205,7 +205,7 @@ func validCommand(c *Command) bool {
 	if c.ExpiresAt.Sub(c.CreatedAt) > maxAge+time.Second {
 		return false
 	}
-	if c.Action == "backlight_preview" {
+	if c.Action == "backlight_preview" || c.Action == "backlight_adjust" || c.Action == "backlight_begin" {
 		if c.Percent == nil || *c.Percent < 10 || *c.Percent > 100 {
 			return false
 		}

@@ -1,7 +1,7 @@
 import { CatalogPicker } from "./catalog-picker";
-import { BacklightStatus } from "./backlight-status";
+import { BacklightControls } from "./backlight-controls";
 import previewPhoto from "./assets/photo-preview.webp";
-import { useId, useState } from "react";
+import { useId } from "react";
 import { numberError, photoTimingLimits } from "./validation";
 import { type Settings } from "./types";
 import type { PageProps } from "./page-types";
@@ -12,17 +12,16 @@ import {
   SectionHeading,
   Segmented,
   Select,
-  StatusPill,
   TextInput,
   Toggle,
   tzLabel,
 } from "./ui";
 import { useT } from "./i18n";
 
-export function ScreenPage({ draft, edit, envelope, runAction, busy, pendingCommand, deviceObservationFresh }: PageProps) {
+export function ScreenPage(props: PageProps) {
+  const { draft, edit, envelope, runAction, busy, pendingCommand, deviceObservationFresh } = props;
   const t = useT();
   const idleHelp = useId();
-  const [previewPercent, setPreviewPercent] = useState(50);
   const s = draft.screen;
   const set = (key: keyof Settings["screen"], value: string | boolean | number) =>
     edit({ ...draft, screen: { ...s, [key]: value } });
@@ -112,61 +111,8 @@ export function ScreenPage({ draft, edit, envelope, runAction, busy, pendingComm
             </Select>
           </span>
         </Field>
-        <Field label={t("Ночной режим")}>
-          <div className="night-row">
-            <Toggle
-              label={
-                s.night_enabled
-                  ? t("Ночной режим включён")
-                  : t("Ночной режим выключен")
-              }
-              checked={s.night_enabled}
-              onChange={(value) => set("night_enabled", value)}
-            />
-            <TextInput
-              type="time"
-              aria-label={t("Начало ночного режима")}
-              value={s.night_start}
-              onChange={(e) => set("night_start", e.target.value)}
-              disabled={!s.night_enabled}
-            />
-            <span>—</span>
-            <TextInput
-              type="time"
-              aria-label={t("Конец ночного режима")}
-              value={s.night_end}
-              onChange={(e) => set("night_end", e.target.value)}
-              disabled={!s.night_enabled}
-            />
-          </div>
-          <small>
-            {" "}{t("Касание разбудит экран.")}{" "}</small>
-        </Field>
       </section>
-      <section className="settings-section">
-        <SectionHeading
-          detail={
-            <StatusPill
-              state={envelope.capabilities.brightness ? "good" : "muted"}
-              label={
-                envelope.capabilities.brightness
-                  ? t("Поддерживается")
-                  : t("Не поддерживается")
-              }
-            />
-          }
-        >
-          {" "}{t("Яркость")}{" "}</SectionHeading>
-        {!envelope.capabilities.brightness && <p>{t("Яркость недоступна до проверки и калибровки подсветки устройства.")}</p>}
-        <BacklightStatus device={envelope.device} transportFresh={deviceObservationFresh ?? false} />
-        {envelope.device.backlight_percent !== undefined && <p>{t("Уровень по настройке")}: {envelope.device.backlight_percent}%</p>}
-        <Field label={t("Дневная яркость")}><input type="range" min={10} max={100} value={s.backlight_percent ?? 100} disabled={!envelope.capabilities.brightness} onChange={(e) => set("backlight_percent", Number(e.target.value))} /> <span>{s.backlight_percent ?? 100}%</span></Field>
-        <Field label={t("Ночное действие")}><Select value={s.night_action || "off"} disabled={!envelope.capabilities.brightness} onChange={(e) => { const action = e.target.value as "off" | "dim"; edit({ ...draft, screen: { ...s, night_action: action, ...(action === "dim" ? { backlight_percent: s.backlight_percent ?? 100, night_backlight_percent: s.night_backlight_percent ?? 20 } : {}) } }); }}><option value="off">{t("Выключить экран")}</option><option value="dim">{t("Уменьшить яркость")}</option></Select></Field>
-        {s.night_action === "dim" && <Field label={t("Ночная яркость")}><input type="range" min={10} max={100} value={s.night_backlight_percent ?? 20} disabled={!envelope.capabilities.brightness} onChange={(e) => set("night_backlight_percent", Number(e.target.value))} /> <span>{s.night_backlight_percent ?? 20}%</span></Field>}
-        {envelope.device.backlight_error && <p>{t("Устройство сообщает об ошибке подсветки.")}</p>}
-        {envelope.device.capabilities.includes("backlight_preview") && <div><Field label={t("Яркость проверки")}><input type="range" min={10} max={100} value={previewPercent} onChange={(e) => setPreviewPercent(Number(e.target.value))} /> {previewPercent}%</Field><button type="button" className="button secondary" disabled={!canRun(envelope.device, "backlight_preview") || busy || pendingCommand} onClick={() => void runAction("backlight_preview", previewPercent)}>{t("Проверить на 20 секунд")}</button> <small>{t("После проверки устройство восстановит прежнюю яркость.")}</small></div>}
-        {envelope.device.capabilities.includes("backlight_restore") && <button type="button" className="button secondary" disabled={!canRun(envelope.device, "backlight_restore") || busy || pendingCommand} onClick={() => void runAction("backlight_restore")}>{t("Восстановить яркость")}</button>}
-      </section>
+      <BacklightControls key={props.deviceId} draft={draft} edit={edit} envelope={envelope} runAction={runAction} busy={busy} pendingCommand={pendingCommand} deviceObservationFresh={deviceObservationFresh} />
     </>
   );
 }
