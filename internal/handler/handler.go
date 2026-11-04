@@ -492,7 +492,7 @@ func (h *Handler) fetchCalendarPlatformRawDetailed(r *http.Request, dayStart, da
 	effectiveComplete := payload.Complete
 	for id := range selectedIDs {
 		source, found := sourceByID[id]
-		if !found || source.Status != "ready" || source.Stale == nil || *source.Stale || (source.CoverageComplete != nil && !*source.CoverageComplete) || source.ErrorCode != "" {
+		if !found || (source.Status != "ready" && source.Status != "disabled") || source.Stale == nil || *source.Stale || (source.CoverageComplete != nil && !*source.CoverageComplete) || source.ErrorCode != "" {
 			effectiveComplete = false
 		}
 	}
@@ -507,7 +507,9 @@ func (h *Handler) fetchCalendarPlatformRawDetailed(r *http.Request, dayStart, da
 			}
 			seen[source.CalendarID] = true
 			reason := "ready"
-			if source.Status != "ready" {
+			if source.Status == "disabled" {
+				reason = "disabled"
+			} else if source.Status != "ready" {
 				reason = "source_pending"
 				if source.Status == "degraded" {
 					reason = "source_incomplete"
@@ -554,7 +556,7 @@ func (h *Handler) fetchCalendarPlatformRawDetailed(r *http.Request, dayStart, da
 			allReady := len(seen) == len(h.calendarPlatformIDs)
 			stale := false
 			for _, source := range details.Sources {
-				allReady = allReady && source.State == "ready" && source.Stale != nil
+				allReady = allReady && (source.State == "ready" || source.State == "disabled") && source.Stale != nil
 				stale = stale || (source.Stale != nil && *source.Stale)
 			}
 			if allReady && stale {
@@ -562,6 +564,15 @@ func (h *Handler) fetchCalendarPlatformRawDetailed(r *http.Request, dayStart, da
 			}
 		}
 	}
+	// Never display events for a source explicitly disabled by the calendar service.
+	items := make([]calendarPlatformEvent, 0, len(payload.Items))
+	for _, item := range payload.Items {
+		if source, found := sourceByID[item.CalendarID]; found && source.Status == "disabled" {
+			continue
+		}
+		items = append(items, item)
+	}
+	payload.Items = items
 	for _, result := range completeness {
 		if result != nil {
 			*result = effectiveComplete
