@@ -277,7 +277,7 @@ func (h *Handler) nextPhotoEvent(r *http.Request, now time.Time) (*photoEvent, e
 			allowed[id] = true
 		}
 		for _, v := range items {
-			if !allowed[v.CalendarID] || strings.EqualFold(v.Status, "cancelled") || v.Start.Date != "" || v.End.Date != "" {
+			if !allowed[v.CalendarID] || v.hidden() || v.Start.Date != "" || v.End.Date != "" {
 				continue
 			}
 			a, e1 := time.Parse(time.RFC3339, v.Start.DateTime)
