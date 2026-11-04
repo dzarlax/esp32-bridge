@@ -417,13 +417,18 @@ type calendarPlatformEventTime struct {
 }
 
 type calendarPlatformEvent struct {
-	partial    bool
-	ID         string                    `json:"id"`
-	CalendarID string                    `json:"calendar_id"`
-	Title      string                    `json:"title"`
-	Status     string                    `json:"status"`
-	Start      calendarPlatformEventTime `json:"start"`
-	End        calendarPlatformEventTime `json:"end"`
+	partial            bool
+	ID                 string                    `json:"id"`
+	CalendarID         string                    `json:"calendar_id"`
+	Title              string                    `json:"title"`
+	Status             string                    `json:"status"`
+	SelfResponseStatus string                    `json:"self_response_status"`
+	Start              calendarPlatformEventTime `json:"start"`
+	End                calendarPlatformEventTime `json:"end"`
+}
+
+func (e calendarPlatformEvent) hidden() bool {
+	return strings.EqualFold(e.Status, "cancelled") || strings.EqualFold(e.SelfResponseStatus, "declined")
 }
 
 type calendarPlatformSource struct {
@@ -599,7 +604,7 @@ func (h *Handler) fetchCalendarPlatformEventsDetailed(r *http.Request, dayStart,
 	result := make([]model.CalendarEvent, 0, len(items))
 	for _, item := range items {
 		index, allowed := indices[item.CalendarID]
-		if !allowed || strings.EqualFold(item.Status, "cancelled") {
+		if !allowed || item.hidden() {
 			continue
 		}
 		event, ok := mapCalendarPlatformEvent(item, index, dayStart, dayEnd)
