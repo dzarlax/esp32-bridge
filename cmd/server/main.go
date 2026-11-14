@@ -14,6 +14,7 @@ import (
 	"esp32-bridge/internal/config"
 	"esp32-bridge/internal/management"
 	"esp32-bridge/internal/settings"
+	"esp32-bridge/internal/voicepush"
 	webui "esp32-bridge/web"
 )
 
@@ -28,6 +29,15 @@ func main() {
 		log.Fatal(e)
 	}
 	mux := http.NewServeMux()
+	publisherToken, subscriberToken, voiceTarget := os.Getenv("VOICE_PUSH_PUBLISHER_TOKEN"), os.Getenv("VOICE_PUSH_SUBSCRIBER_TOKEN"), os.Getenv("VOICE_PUSH_TARGET_ID")
+	if publisherToken != "" && subscriberToken != "" && voiceTarget != "" {
+		if len(publisherToken) < 24 || len(subscriberToken) < 24 || publisherToken == subscriberToken || publisherToken == cfg.APIKey || subscriberToken == cfg.APIKey || strings.ContainsAny(publisherToken+subscriberToken, " \t\r\n") {
+			log.Fatal("voice push requires distinct private publisher and subscriber credentials")
+		}
+	}
+	voice := voicepush.New(publisherToken, subscriberToken, voiceTarget)
+	defer voice.Close()
+	voice.Register(mux)
 	enabled, e := strconv.ParseBool(env("ADMIN_ENABLED", "false"))
 	if e != nil {
 		log.Fatal("invalid ADMIN_ENABLED")
