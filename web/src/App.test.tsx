@@ -577,4 +577,30 @@ describe("multi-display shell", () => {
     await act(async () => { failOldRead(); for (let i = 0; i < 10; i++) await Promise.resolve(); });
     expect(screen.queryByText("Не удалось обновить статус. Показано последнее известное состояние.")).toBeNull();
   });
+
+  it("integrates device voice pairing with the authenticated admin API", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.endsWith("/session")) return json({ authenticated: true, password_enabled: true, cloudflare_enabled: false, csrf_token: "csrf-voice" });
+      if (path.endsWith("/devices")) return json({ devices: [{ id: firstId, name: "Hall", connected: true, last_seen: new Date().toISOString(), applied_revision: 2, desired_revision: 2, firmware: "1.0", ip: "192.0.2.10", ssid: "Test" }], max_devices: 8 });
+      if (path.endsWith("/connections")) return json(connections);
+      if (path.endsWith("/updates")) return json({ current_version: "1.0", available_version: "", update_available: false, device_connected: true });
+      if (path.endsWith(`/devices/${firstId}/settings`)) return json(settingsEnvelope(firstId, "Hall"));
+      if (path.endsWith(`/devices/${firstId}/voice/pair`)) return json({ device_id: firstId, status: "pending", wss_origin: "wss://bridge.example.test:443" });
+      if (path.endsWith(`/devices/${firstId}/voice`)) return json({ device_id: firstId, status: "unconfigured", wss_origin: "wss://bridge.example.test:443" });
+      return json({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    await screen.findByLabelText("Имя дисплея");
+    fireEvent.click(screen.getByRole("button", { name: "Об устройстве" }));
+    await screen.findByLabelText("Код подключения");
+    fireEvent.change(screen.getByLabelText("Код подключения"), { target: { value: "single-use-code" } });
+    fireEvent.click(screen.getByRole("button", { name: "Подключить дисплей" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith(`/devices/${firstId}/voice/pair`))).toBe(true));
+    const [, init] = fetchMock.mock.calls.find(([url]) => String(url).endsWith(`/devices/${firstId}/voice/pair`)) as unknown as [string, RequestInit];
+    expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("csrf-voice");
+    expect(JSON.parse(String(init.body))).toEqual({ pairing_code: "single-use-code", wss_origin: "wss://bridge.example.test:443" });
+    expect(screen.getByRole("region", { name: "Голосовое подключение дисплея" }).textContent).not.toContain("single-use-code");
+  });
 });

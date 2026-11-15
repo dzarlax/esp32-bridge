@@ -25,6 +25,7 @@ import { canRun, Field, Icon, type Ask, StatusPill, TextInput } from "./ui";
 import { LanguageSelect, LocaleProvider, useT } from "./i18n";
 import { hasCurrentApplicationAck, sameSettings } from "./settings-apply-status";
 import { SettingsApplyStatusCard } from "./settings-apply-status-card";
+import { VoicePairingSettings } from "./VoicePairingPanel";
 
 const api = new AdminApi();
 const FIRMWARE_READ_MAX_AGE_MS = 15_000;
@@ -692,7 +693,7 @@ function AppContent() {
             {section === "services" && <ServicesPage {...pageProps} />}
             {section === "network" && <NetworkPage {...pageProps} />}
             {section === "updates" && <UpdatesPage {...pageProps} />}
-            {section === "device" && <DevicePage {...pageProps} />}
+            {section === "device" && <><DevicePage {...pageProps} /><VoicePairingSettings api={api} deviceId={selectedDeviceId} selectionKey={`${selectedDeviceId}:${selectionEpoch.current}`} /></>}
           </div>
           {dirty && <div className="sticky-save"><span>{dirtySecrets ? t("Изменения не сохранены") : t("Есть несохранённые изменения")}</span><div><button className="button secondary" onClick={cancel} disabled={busy}>{t("Отменить")}</button><button className="button primary" onClick={() => void save()} disabled={busy}>{busy ? t("Сохранение…") : t("Сохранить изменения")}</button></div></div>}
           <footer className="page-footer">{t("Настройки сохраняются в Bridge. Применение на дисплее подтверждается отдельно.")}</footer>

@@ -8,6 +8,7 @@ import type {
   Settings,
   SharedConnections,
   UpdateInfo,
+  VoicePairingState,
 } from "./types";
 import { apiErrorMessage } from "./error-messages";
 
@@ -161,6 +162,35 @@ export class AdminApi {
   updates(deviceId: string) {
     return this.request<UpdateInfo>(this.devicePath(deviceId, "updates"));
   }
+  async voicePairing(deviceId: string, signal?: AbortSignal): Promise<VoicePairingState> {
+    const result = await this.request<unknown>(this.devicePath(deviceId, "voice"), { signal });
+    return normalizeVoicePairingState(result, deviceId);
+  }
+  async pairVoice(deviceId: string, pairingCode: string, wssOrigin: string): Promise<VoicePairingState> {
+    try {
+      const result = await this.request<unknown>(this.devicePath(deviceId, "voice/pair"), {
+        method: "POST",
+        body: JSON.stringify({ pairing_code: pairingCode, wss_origin: wssOrigin }),
+      });
+      return normalizeVoicePairingState(result, deviceId);
+    } catch (error) {
+      throw sanitizedVoiceError(error);
+    }
+  }
+  async disableVoice(deviceId: string): Promise<VoicePairingState> {
+    return this.mutateVoice(deviceId, "voice/disable");
+  }
+  async cancelVoicePairing(deviceId: string): Promise<VoicePairingState> {
+    return this.mutateVoice(deviceId, "voice/cancel");
+  }
+  private async mutateVoice(deviceId: string, path: string): Promise<VoicePairingState> {
+    try {
+      const result = await this.request<unknown>(this.devicePath(deviceId, path), { method: "POST", body: "{}" });
+      return normalizeVoicePairingState(result, deviceId);
+    } catch (error) {
+      throw sanitizedVoiceError(error);
+    }
+  }
   action(
     deviceId: string,
     action: "photo_start" | "restart" | "ota_check" | "ota_install" | "reset" | "backlight_preview" | "backlight_adjust" | "backlight_begin" | "backlight_restore",
@@ -200,6 +230,72 @@ export class AdminApi {
     }
     return `/api/admin/v1/devices/${deviceId}/${suffix}`;
   }
+}
+
+const voicePairingStatuses = new Set<VoicePairingState["status"]>([
+  "unconfigured", "pending", "applied", "connected", "revoked_cleanup_pending", "error",
+]);
+
+function normalizeVoicePairingState(value: unknown, expectedDeviceId: string): VoicePairingState {
+  if (!value || typeof value !== "object") throw new ApiError("invalid_response", 502);
+  const state = value as Record<string, unknown>;
+  if (state.device_id !== expectedDeviceId || typeof state.wss_origin !== "string" ||
+      !voicePairingStatuses.has(state.status as VoicePairingState["status"]) ||
+      (state.wss_origin !== "" && normalizeWssOrigin(state.wss_origin) !== state.wss_origin)) {
+    throw new ApiError("invalid_response", 502);
+  }
+  // Return only the public state fields; never retain unexpected response fields.
+  return { device_id: expectedDeviceId, wss_origin: state.wss_origin, status: state.status as VoicePairingState["status"] };
+}
+
+/** Converts a user-entered WSS origin to the backend's strict canonical authority form. */
+export function normalizeWssOrigin(value: string): string | null {
+  const input = value.trim();
+  if (!input || input.length > 159) return null;
+  const match = input.match(/^wss:\/\/([^/?#]*)(\/?$)/i);
+  if (!match || !match[1] || match[1].includes("@")) return null;
+  let parsed: URL;
+  try { parsed = new URL(input); } catch { return null; }
+  if (parsed.protocol !== "wss:" || parsed.username || parsed.password || parsed.pathname !== "/" || parsed.search || parsed.hash || /[?#]/.test(input)) return null;
+
+  const authority = match[1];
+  let rawHost: string;
+  let rawPort: string | null = null;
+  if (authority.startsWith("[")) {
+    const close = authority.indexOf("]");
+    if (close < 0) return null;
+    rawHost = authority.slice(0, close + 1);
+    const tail = authority.slice(close + 1);
+    if (tail) {
+      if (!tail.startsWith(":") || tail.length === 1) return null;
+      rawPort = tail.slice(1);
+    }
+    if (!rawHost.endsWith("]") || !parsed.hostname.startsWith("[") || parsed.hostname.includes("%") || parsed.hostname.toLowerCase().startsWith("[::ffff:")) return null;
+  } else {
+    const firstColon = authority.indexOf(":");
+    const lastColon = authority.lastIndexOf(":");
+    if (firstColon !== lastColon) return null;
+    rawHost = firstColon < 0 ? authority : authority.slice(0, firstColon);
+    if (firstColon >= 0) {
+      rawPort = authority.slice(firstColon + 1);
+      if (!rawPort) return null;
+    }
+    if (!parsed.hostname || parsed.hostname.startsWith("[") || parsed.hostname.endsWith(".")) return null;
+    const labels = parsed.hostname.split(".");
+    if (parsed.hostname.length > 253 || labels.some((label) => !label || label.length > 63 || label.startsWith("-") || label.endsWith("-") || !/^[a-z0-9-]+$/.test(label))) return null;
+  }
+
+  if (rawPort !== null && !/^(0|[1-9][0-9]*)$/.test(rawPort)) return null;
+  const port = rawPort === null ? 443 : Number(rawPort);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
+  const host = parsed.hostname.toLowerCase();
+  if (!host || rawHost === "") return null;
+  return `wss://${host}:${port}`;
+}
+
+function sanitizedVoiceError(error: unknown): Error {
+  if (error instanceof ApiError) return new ApiError(error.code, error.status);
+  return new ApiError("network_error", 0);
 }
 
 export function isRevisionConflict(error: unknown): boolean {

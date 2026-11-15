@@ -26,6 +26,8 @@ type API struct {
 	Statuses       func(string) map[string]settings.Status
 	Updates        func(string, string) map[string]any
 	CalendarStatus func(context.Context, string) (handler.CalendarDetails, error)
+	VoiceAdmin     http.Handler
+	VoiceClear     func(string) any
 }
 
 func (a *API) Register(mux *http.ServeMux, require func(http.Handler) http.Handler) {
@@ -214,6 +216,10 @@ func (a *API) deviceRoute(w http.ResponseWriter, r *http.Request) {
 	const prefix = "/api/admin/v1/devices/"
 	path := strings.TrimPrefix(r.URL.Path, prefix)
 	parts := strings.Split(path, "/")
+	if len(parts) >= 2 && parts[1] == "voice" && a.VoiceAdmin != nil {
+		a.VoiceAdmin.ServeHTTP(w, r)
+		return
+	}
 	if len(parts) != 2 || !validID(parts[0]) {
 		http.NotFound(w, r)
 		return
@@ -440,6 +446,20 @@ func (a *API) sync(w http.ResponseWriter, r *http.Request) {
 		}
 		failure(w, http.StatusUnprocessableEntity, "invalid_device_state")
 		return
+	}
+	if a.VoiceClear != nil {
+		if clear := a.VoiceClear(headerID); clear != nil {
+			b, err := json.Marshal(response)
+			var fields map[string]json.RawMessage
+			if err == nil && json.Unmarshal(b, &fields) == nil {
+				clearJSON, clearErr := json.Marshal(clear)
+				fields["voice_clear"] = clearJSON
+				if encoded, err := json.Marshal(fields); clearErr == nil && err == nil && len(encoded)+1 <= 8192 {
+					output(w, http.StatusOK, fields)
+					return
+				}
+			}
+		}
 	}
 	output(w, http.StatusOK, response)
 }

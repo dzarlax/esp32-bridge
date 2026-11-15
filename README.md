@@ -506,3 +506,9 @@ as success merely because the target version is later observed.
 private JSONL and a summary. It cannot restart or flash a device, and its result
 is separate from physical acceptance. See [the device acceptance checklist](docs/device-acceptance-checklist.md)
 for three supervised restarts, a 24-hour run, and day/night checks.
+
+### Pairing rollback guard
+
+When voice pairing is disabled, the server refuses to start the legacy voice hub if any voice pairing state, origin, key, TLS, or enabled migration configuration remains. This conservative guard also blocks configurations where the durable managed state cannot be read. Existing installations with no pairing configuration retain their original startup behavior. Re-enabling the pairing configuration is the safe way to preserve the durable managed mode after an operational rollback.
+
+The guard cannot detect a previous pairing installation if all external pairing configuration markers are removed, or if an older server binary that predates this guard is started. Removing those markers or downgrading the binary while legacy credentials remain can reactivate the legacy bearer; avoid that rollback and remove legacy credentials before any such change.

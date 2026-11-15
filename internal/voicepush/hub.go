@@ -53,7 +53,20 @@ type Clear struct {
 	Reason   string `json:"reason"`
 }
 
+// PairIdentity identifies a specific immutable issuance of a device credential.
+type PairIdentity struct {
+	DeviceID   string
+	Generation string
+}
+
+// PairVerifier returns the current identity for a token; revoked tokens return ok=false.
+// Implementations must be concurrency-safe and must not call back into the Hub.
+type PairVerifier func(token string) (identity PairIdentity, ok bool)
+
 type Hub struct {
+	routing                       sync.RWMutex // serializes routing changes with authorization and writes
+	verifier                      PairVerifier
+	paired                        bool
 	publisher, subscriber, target string
 	mu                            sync.Mutex
 	lease                         string
@@ -77,8 +90,10 @@ type hubEvent struct {
 	replay   bool
 }
 type client struct {
-	conn    *websocket.Conn
-	mailbox chan hubEvent
+	conn     *websocket.Conn
+	token    string
+	identity PairIdentity
+	mailbox  chan hubEvent
 	// Only the WebSocket writer goroutine touches delivery state.
 	deliveredLease    string
 	deliveredRevision uint64
@@ -88,7 +103,181 @@ type client struct {
 func New(publisherBearer, subscriberBearer, target string) *Hub {
 	return &Hub{publisher: publisherBearer, subscriber: subscriberBearer, target: target, subs: make(map[*client]struct{})}
 }
+
+// NewPaired explicitly enables per-device subscriber authorization. The target may
+// be empty to disable subscribers until SetTarget is called. Publisher authentication
+// and the publisher protocol remain unchanged.
+func NewPaired(publisherBearer, target string, verifier PairVerifier) *Hub {
+	return &Hub{publisher: publisherBearer, target: target, verifier: verifier, paired: true, subs: make(map[*client]struct{})}
+}
+
+// NewMigrating starts in legacy mode until the pairing store reports its durable
+// managed marker. After the marker is set, callers must pass managed=true on restart.
+func NewMigrating(publisher, legacySubscriber, legacyTarget string, verifier PairVerifier, pairedTarget string, managed bool) *Hub {
+	if managed {
+		return NewPaired(publisher, pairedTarget, verifier)
+	}
+	h := New(publisher, legacySubscriber, legacyTarget)
+	h.verifier = verifier
+	return h
+}
+
+// SetTarget switches the active device, invalidates the publisher lease and retained
+// events, and disconnects all subscribers. A new publisher lease is required.
+func (h *Hub) SetTarget(target string) {
+	h.routing.Lock()
+	defer h.routing.Unlock()
+	h.setTargetLocked(target)
+}
+
+func (h *Hub) setTargetLocked(target string) {
+	if !h.paired || h.target == target {
+		return
+	}
+	h.resetRoutingLocked(target)
+}
+
+func (h *Hub) resetRoutingLocked(target string) {
+	h.mu.Lock()
+	h.target = target
+	if h.expiryTimer != nil {
+		h.expiryTimer.Stop()
+		h.expiryTimer = nil
+	}
+	h.lease, h.last, h.revision, h.snapshotHash, h.active, h.accepted = "", nil, 0, [32]byte{}, false, time.Time{}
+	h.lastClear = nil
+	h.eventSeq++
+	clients := make([]*client, 0, len(h.subs))
+	for c := range h.subs {
+		clients = append(clients, c)
+		delete(h.subs, c)
+	}
+	h.mu.Unlock()
+	for _, c := range clients {
+		if c.conn != nil {
+			_ = c.conn.Close()
+		}
+	}
+}
+
+// Connected reports whether the active paired device has a registered subscriber
+// whose credential is still valid. It does not alter subscriber state.
+func (h *Hub) Connected(deviceID string) bool {
+	h.routing.RLock()
+	defer h.routing.RUnlock()
+	if !h.paired || h.verifier == nil || deviceID == "" || h.target != deviceID {
+		return false
+	}
+	h.mu.Lock()
+	if h.closed {
+		h.mu.Unlock()
+		return false
+	}
+	clients := make([]*client, 0, len(h.subs))
+	for c := range h.subs {
+		clients = append(clients, c)
+	}
+	h.mu.Unlock()
+	for _, c := range clients {
+		id, ok := h.verifier(c.token)
+		if ok && id == c.identity && id.DeviceID == deviceID {
+			h.mu.Lock()
+			_, registered := h.subs[c]
+			registered = registered && !h.closed
+			h.mu.Unlock()
+			if registered {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Revalidate disconnects subscribers whose credentials were revoked or rotated.
+// Call it after updating the verifier's backing store. Delivery also revalidates.
+func (h *Hub) Revalidate() {
+	h.routing.Lock()
+	defer h.routing.Unlock()
+	h.revalidateLocked()
+}
+
+func (h *Hub) revalidateLocked() {
+	if !h.paired || h.verifier == nil {
+		return
+	}
+	h.mu.Lock()
+	clients := make([]*client, 0, len(h.subs))
+	for c := range h.subs {
+		clients = append(clients, c)
+	}
+	target := h.target
+	h.mu.Unlock()
+	for _, c := range clients {
+		id, ok := h.verifier(c.token)
+		if !ok || id != c.identity || id.DeviceID != target {
+			h.mu.Lock()
+			delete(h.subs, c)
+			h.mu.Unlock()
+			if c.conn != nil {
+				_ = c.conn.Close()
+			}
+		}
+	}
+}
+
+// RoutingUpdate serializes a pairing-store mutation and routing reconciliation
+// against subscriber authorization and delivery. update must return the current
+// authoritative target even on a mutation error, or an empty target if it cannot
+// establish the current target. It must release store locks before returning and
+// must not call Hub routing methods. Reconciliation runs even if update fails.
+// Wrap the store mutation itself in update; calling this after a mutation leaves
+// a window where old subscribers can receive data.
+func (h *Hub) RoutingUpdate(update func() (target string, err error)) error {
+	h.routing.Lock()
+	defer h.routing.Unlock()
+	if !h.paired {
+		return errors.New("paired routing is not enabled")
+	}
+	target, err := update()
+	h.setTargetLocked(target)
+	h.revalidateLocked()
+	return err
+}
+
+// RoutingUpdateMode runs the mutation and reads the durable managed marker under
+// the delivery barrier. The callback must release all store locks before returning.
+// err means the authoritative mode/target could not be read: routing then fails
+// closed. An operation error with a successful state read must be carried separately
+// by the caller; return nil here and the verified state. Managed mode is irreversible.
+func (h *Hub) RoutingUpdateMode(update func() (managed bool, target string, err error)) error {
+	h.routing.Lock()
+	defer h.routing.Unlock()
+	managed, target, err := update()
+	if err != nil {
+		managed = true
+		target = ""
+	}
+	if managed && !h.paired {
+		h.paired = true
+		// Force invalidation even when legacy and paired target IDs happen to match.
+		h.resetRoutingLocked(target)
+	} else if h.paired {
+		// Never return to legacy, even after revocation or an inconsistent marker.
+		if !managed {
+			target = ""
+		}
+		h.setTargetLocked(target)
+	}
+	if h.paired {
+		h.revalidateLocked()
+	}
+	return err
+}
+
 func (h *Hub) enabled() bool {
+	if h.paired {
+		return h.publisher != "" && h.verifier != nil
+	}
 	return h.publisher != "" && h.subscriber != "" && h.target != "" && h.publisher != h.subscriber
 }
 func (h *Hub) Register(mux *http.ServeMux) {
@@ -110,11 +299,15 @@ func (h *Hub) authorize(w http.ResponseWriter, r *http.Request, expected string)
 	return true
 }
 func (h *Hub) handleLease(w http.ResponseWriter, r *http.Request) {
-	if !h.authorize(w, r, h.publisher) {
+	h.routing.RLock()
+	authorized := h.authorize(w, r, h.publisher)
+	if !authorized {
+		h.routing.RUnlock()
 		return
 	}
 	b := make([]byte, 24)
 	if _, err := rand.Read(b); err != nil {
+		h.routing.RUnlock()
 		http.Error(w, "unavailable", 500)
 		return
 	}
@@ -122,6 +315,7 @@ func (h *Hub) handleLease(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	if h.closed {
 		h.mu.Unlock()
+		h.routing.RUnlock()
 		http.Error(w, "unavailable", 503)
 		return
 	}
@@ -139,11 +333,15 @@ func (h *Hub) handleLease(w http.ResponseWriter, r *http.Request) {
 		h.broadcastClearLocked(Clear{1, "voice.clear", old, oldRevision, "reset"})
 	}
 	h.mu.Unlock()
+	h.routing.RUnlock()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{"lease_id": id})
 }
 func (h *Hub) handlePublish(w http.ResponseWriter, r *http.Request) {
-	if !h.authorize(w, r, h.publisher) {
+	h.routing.RLock()
+	authorized := h.authorize(w, r, h.publisher)
+	h.routing.RUnlock()
+	if !authorized {
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
@@ -341,6 +539,18 @@ func (h *Hub) prepareEvent(ev hubEvent) []byte {
 // actually received, even if intermediate lease events were coalesced. The
 // writer owns c's delivery state and runs serially; the queue stays bounded.
 func (h *Hub) deliver(c *client, ev hubEvent, write func([]byte, time.Time) error) error {
+	h.routing.RLock()
+	defer h.routing.RUnlock()
+	if h.paired {
+		id, ok := h.verifier(c.token)
+		h.mu.Lock()
+		target := h.target
+		_, connected := h.subs[c]
+		h.mu.Unlock()
+		if !ok || !connected || id != c.identity || id.DeviceID != target {
+			return errors.New("subscriber unauthorized")
+		}
+	}
 	b := h.prepareEvent(ev)
 	if b == nil {
 		return nil
@@ -378,27 +588,50 @@ func (h *Hub) deliver(c *client, ev hubEvent, write func([]byte, time.Time) erro
 	return nil
 }
 func (h *Hub) handleEvents(w http.ResponseWriter, r *http.Request) {
-	if !h.authorize(w, r, h.subscriber) {
+	var token string
+	var identity PairIdentity
+	h.routing.RLock()
+	if h.paired {
+		const prefix = "Bearer "
+		auth := r.Header.Get("Authorization")
+		if !h.enabled() || !strings.HasPrefix(auth, prefix) || len(auth) == len(prefix) {
+			h.routing.RUnlock()
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		token = auth[len(prefix):]
+		var ok bool
+		identity, ok = h.verifier(token)
+		if !ok || identity.DeviceID == "" || identity.DeviceID != h.target || token == h.publisher {
+			h.routing.RUnlock()
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+	} else if !h.authorize(w, r, h.subscriber) {
+		h.routing.RUnlock()
 		return
 	}
 	h.mu.Lock()
 	full := h.closed || len(h.subs) >= maxSubscribers
 	h.mu.Unlock()
 	if full {
+		h.routing.RUnlock()
 		http.Error(w, "subscriber limit", http.StatusServiceUnavailable)
 		return
 	}
-	conn, err := (&websocket.Upgrader{CheckOrigin: func(r *http.Request) bool {
+	conn, err := (&websocket.Upgrader{HandshakeTimeout: 5 * time.Second, CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
 		return origin == "" || strings.EqualFold(origin, "https://"+r.Host) || strings.EqualFold(origin, "http://"+r.Host)
 	}, ReadBufferSize: 1024, WriteBufferSize: 4096}).Upgrade(w, r, nil)
 	if err != nil {
+		h.routing.RUnlock()
 		return
 	}
-	c := &client{conn: conn, mailbox: make(chan hubEvent, 1)}
+	c := &client{conn: conn, token: token, identity: identity, mailbox: make(chan hubEvent, 1)}
 	h.mu.Lock()
 	if h.closed || len(h.subs) >= maxSubscribers {
 		h.mu.Unlock()
+		h.routing.RUnlock()
 		_ = conn.Close()
 		return
 	}
@@ -412,6 +645,8 @@ func (h *Hub) handleEvents(w http.ResponseWriter, r *http.Request) {
 		h.enqueueLocked(c, hubEvent{seq: h.eventSeq, clear: &cp})
 	}
 	h.mu.Unlock()
+	h.routing.RUnlock()
+	// The connection has been registered; subsequent writes acquire the routing lock.
 	conn.SetReadLimit(1024)
 	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
 	conn.SetPongHandler(func(string) error { return conn.SetReadDeadline(time.Now().Add(pongWait)) })

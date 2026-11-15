@@ -34,10 +34,15 @@ jobs:
         with:
           go-version-file: go.mod
       - run: python3 -m unittest discover -s tools -p 'test_device_soak.py'
-      - run: go test ./...
+      - run: go test -race ./...
       - run: go vet ./...
       - run: go build ./...
       - run: go build -tags webassets ./cmd/server
+
+      - name: Verify isolated Traefik and Bridge voice path
+        run: |
+          docker pull traefik:v3.7.16@sha256:c8a121e4bb1347e8fd52657fab12f2cb70b68f8a018895e2068f92c9e519b9c2
+          deploy/voice-pairing/test-traefik-system.sh
 
   docker:
     name: Docker Build & Push
