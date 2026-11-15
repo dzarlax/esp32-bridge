@@ -4,6 +4,7 @@ import { LocaleProvider, translationCatalogKeys } from "./i18n";
 import { VoicePairingPanel, VoicePairingSettings, type VoicePairingStatus } from "./VoicePairingPanel";
 import type { VoicePairingState } from "./types";
 import { ApiError } from "./api";
+import { pairingPayload, qrFrame } from "./testdata/qr-frame";
 
 const originalBarcodeDetector = Object.getOwnPropertyDescriptor(window, "BarcodeDetector");
 const originalMediaDevices = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
@@ -97,14 +98,14 @@ it("clears pairing material on cancel and when the selected device changes", asy
   expect((screen.getByLabelText("Код подключения") as HTMLInputElement).value).toBe("");
 });
 
-it("requests camera permission only after a click and leaves manual entry available when native QR support is absent", () => {
-  const getUserMedia = vi.fn();
+it("requests camera permission only after a click even without native QR support", async () => {
+  const getUserMedia = vi.fn().mockRejectedValue(new Error("permission denied"));
   Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia } });
   renderPanel();
   expect(getUserMedia).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Сканировать QR-код камерой" }));
-  expect(getUserMedia).not.toHaveBeenCalled();
-  expect(screen.getByRole("status").textContent).toContain("Сканирование камерой недоступно");
+  expect(getUserMedia).toHaveBeenCalledOnce();
+  await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Не удалось запустить камеру"));
   expect(screen.getByLabelText("Код подключения")).toBeTruthy();
 });
 
@@ -129,6 +130,31 @@ it("scans a QR code without echoing it and stops the camera tracks", async () =>
   expect(handlers.onSubmitPairing).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Подключить дисплей" }));
   expect(handlers.onSubmitPairing).toHaveBeenCalledWith("display-a", "qr-one-time-capability", "wss://bridge.example.test:443");
+});
+
+it("reads a full QR through the Safari fallback and requires explicit pairing submission", async () => {
+  Reflect.deleteProperty(window, "BarcodeDetector");
+  const stop = vi.fn();
+  const stream = { getTracks: () => [{ stop }] } as unknown as MediaStream;
+  const getUserMedia = vi.fn().mockResolvedValue(stream);
+  Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia } });
+  const frame = qrFrame();
+  vi.spyOn(HTMLVideoElement.prototype, "videoWidth", "get").mockReturnValue(frame.width);
+  vi.spyOn(HTMLVideoElement.prototype, "videoHeight", "get").mockReturnValue(frame.height);
+  vi.spyOn(HTMLMediaElement.prototype, "readyState", "get").mockReturnValue(HTMLMediaElement.HAVE_CURRENT_DATA);
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ drawImage: vi.fn(), getImageData: () => frame } as unknown as CanvasRenderingContext2D);
+  HTMLMediaElement.prototype.play = vi.fn().mockResolvedValue(undefined);
+  const { handlers, container } = renderPanel();
+  expect(getUserMedia).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Сканировать QR-код камерой" }));
+  await waitFor(() => expect(screen.getByLabelText("Код подключения")).toHaveProperty("value", pairingPayload));
+  expect(stop).toHaveBeenCalledOnce();
+  expect(screen.getByLabelText("Код подключения")).toHaveProperty("type", "password");
+  expect(container.textContent).not.toContain(pairingPayload);
+  expect(handlers.onSubmitPairing).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Подключить дисплей" }));
+  expect(handlers.onSubmitPairing).toHaveBeenCalledWith("display-a", pairingPayload, "wss://bridge.example.test:443");
+  expect(screen.getByLabelText("Код подключения")).toHaveProperty("value", "");
 });
 
 it("stops camera tracks on cancel, unmount, and selected-device switch", async () => {
@@ -199,7 +225,7 @@ it("does not restart scanning when video playback resolves after cancellation", 
   resolvePlay();
   await waitFor(() => expect(stop).toHaveBeenCalled());
   expect(screen.queryByRole("button", { name: "Остановить камеру" })).toBeNull();
-  expect(screen.queryByLabelText("Предпросмотр камеры для QR-кода")).toBeNull();
+  expect(screen.getByLabelText("Предпросмотр камеры для QR-кода")).toHaveProperty("hidden", true);
   expect(handlers.onSubmitPairing).not.toHaveBeenCalled();
 });
 
