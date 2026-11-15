@@ -246,8 +246,20 @@ func composedTLSFlow(t *testing.T, poison bool) {
 		t.Fatal(err)
 	}
 	defer ws.Close()
-	if code, out := call("GET", adminPath, nil, true); code != 200 || out["status"] != "connected" {
-		t.Fatal("connected status")
+	// The client can finish the handshake before the server registers the socket.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		code, out := call("GET", adminPath, nil, true)
+		if code != http.StatusOK {
+			t.Fatalf("connected status request: %d", code)
+		}
+		if out["status"] == "connected" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("socket was not registered before the deadline")
+		}
+		time.Sleep(time.Millisecond)
 	}
 	if code, _ := call("POST", "/api/admin/v1/devices/"+other+"/voice/disable", map[string]any{}, true); code == 200 {
 		t.Fatal("unpaired device revoke accepted")

@@ -279,8 +279,9 @@ export function VoicePairingSettings({ deviceId, selectionKey, api }: { deviceId
     if (!selected || isBusy || pollCount >= 5 || !["pending", "revoked_cleanup_pending"].includes(selected.status)) return;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      setPollCount((count) => count + 1);
-      void applyRead(deviceId, selectionKey, controller.signal);
+      void applyRead(deviceId, selectionKey, controller.signal).finally(() => {
+        if (!controller.signal.aborted) setPollCount((count) => count + 1);
+      });
     }, 8000);
     return () => { window.clearTimeout(timer); controller.abort(); };
   }, [applyRead, deviceId, isBusy, pollCount, selected, selectionKey]);

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { LocaleProvider, translationCatalogKeys } from "./i18n";
 import { VoicePairingPanel, VoicePairingSettings, type VoicePairingStatus } from "./VoicePairingPanel";
@@ -17,6 +17,7 @@ afterEach(() => {
   else Reflect.deleteProperty(navigator, "mediaDevices");
   HTMLMediaElement.prototype.play = originalVideoPlay;
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 function renderPanel(deviceId = "display-a", status: VoicePairingStatus = "unconfigured") {
@@ -274,6 +275,27 @@ it("shows unsupported API as unavailable instead of a ready state", async () => 
   await waitFor(() => expect(screen.getByRole("status").textContent).toContain("API голосового подключения недоступен"));
   expect(screen.queryByText("Подключено")).toBeNull();
   expect(screen.queryByLabelText("Код подключения")).toBeNull();
+});
+
+it.each(["pending", "revoked_cleanup_pending"] as const)("keeps an asynchronous %s poll alive until its response arrives", async (status) => {
+  vi.useFakeTimers();
+  let resolvePoll!: (value: VoicePairingState) => void;
+  let pollSignal: AbortSignal | undefined;
+  const voicePairing = vi.fn()
+    .mockResolvedValueOnce(voiceState("display-a", status))
+    .mockImplementationOnce((_id: string, signal?: AbortSignal) => {
+      pollSignal = signal;
+      return new Promise<VoicePairingState>((resolve) => { resolvePoll = resolve; });
+    });
+  await act(async () => {
+    render(<LocaleProvider><VoicePairingSettings api={voiceApi({ voicePairing })} deviceId="display-a" selectionKey="display-a:1" /></LocaleProvider>);
+  });
+  await act(async () => { vi.advanceTimersByTime(8000); });
+  expect(voicePairing).toHaveBeenCalledTimes(2);
+  expect(pollSignal).toBeDefined();
+  expect(pollSignal?.aborted).toBe(false);
+  await act(async () => { resolvePoll(voiceState("display-a", "connected")); });
+  expect(screen.getByText("Подключено")).toBeTruthy();
 });
 
 it("refreshes the selected device status on demand", async () => {
