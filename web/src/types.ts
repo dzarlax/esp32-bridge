@@ -83,6 +83,8 @@ export type DeviceList = {
   devices: DeviceProfile[];
   max_devices: number;
 };
+export type VoicePairingStatus = "unconfigured" | "pending" | "applied" | "connected" | "revoked_cleanup_pending" | "error";
+export type VoicePairingState = { device_id: string; wss_origin: string; status: VoicePairingStatus };
 export type SharedConnections = {
   immich: { base_url: string };
   health: { base_url: string };

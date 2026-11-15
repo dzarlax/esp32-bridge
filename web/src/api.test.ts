@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AdminApi, ApiError, isRevisionConflict } from "./api";
+import { AdminApi, ApiError, isRevisionConflict, normalizeWssOrigin } from "./api";
 import { formatUptime, isCommandFinal, type Envelope, type SharedConnections } from "./types";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -61,6 +61,61 @@ describe("AdminApi", () => {
       network_credentials: { wifi_ssid: "mesh" },
     });
     expect(String(fetchMock.mock.calls[0][0])).toBe(`/api/admin/v1/devices/${deviceId}/settings`);
+  });
+
+  it("sends the selected device's pairing code once with CSRF and returns no secret fields", async () => {
+    const deviceId = "b".repeat(32);
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      device_id: deviceId, status: "pending", wss_origin: "wss://bridge.example.test:443", pairing_code: "must-not-return",
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const api = new AdminApi();
+    api.setCsrf("csrf-voice");
+    const result = await api.pairVoice(deviceId, "one-time-code", "wss://bridge.example.test:443");
+    const [path, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(path).toBe(`/api/admin/v1/devices/${deviceId}/voice/pair`);
+    expect(init.method).toBe("POST");
+    expect(init.cache).toBe("no-store");
+    expect(init.credentials).toBe("same-origin");
+    expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("csrf-voice");
+    expect(JSON.parse(String(init.body))).toEqual({ pairing_code: "one-time-code", wss_origin: "wss://bridge.example.test:443" });
+    expect(result).toEqual({ device_id: deviceId, status: "pending", wss_origin: "wss://bridge.example.test:443" });
+    expect(JSON.stringify(result)).not.toContain("one-time-code");
+  });
+
+  it("validates voice status device identity and strips mutation error bodies", async () => {
+    const deviceId = "c".repeat(32);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ device_id: "d".repeat(32), status: "connected", wss_origin: "wss://bridge.example.test:443" }), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    })));
+    await expect(new AdminApi().voicePairing(deviceId)).rejects.toMatchObject({ code: "invalid_response", status: 502 });
+
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "firmware_update_required", pairing_code: "must-not-retain" }), {
+      status: 426, headers: { "Content-Type": "application/json" },
+    })));
+    const error = await new AdminApi().pairVoice(deviceId, "one-time-code", "wss://bridge.example.test:443").catch((value) => value);
+    expect(error).toMatchObject({ code: "firmware_update_required", status: 426 });
+    expect(error.body).toBeUndefined();
+  });
+
+  it("rejects noncanonical WSS origins returned by the admin API", async () => {
+    const deviceId = "e".repeat(32);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      device_id: deviceId, status: "connected", wss_origin: "wss://bridge.example.test/path",
+    }), { status: 200, headers: { "Content-Type": "application/json" } })));
+    await expect(new AdminApi().voicePairing(deviceId)).rejects.toMatchObject({ code: "invalid_response", status: 502 });
+  });
+
+  it("canonicalizes WSS origins and rejects non-origin URL components", () => {
+    expect(normalizeWssOrigin("wss://example.org")).toBe("wss://example.org:443");
+    expect(normalizeWssOrigin("WSS://EXAMPLE.ORG:443/")).toBe("wss://example.org:443");
+    expect(normalizeWssOrigin("wss://[2001:0DB8:0:0::1]")).toBe("wss://[2001:db8::1]:443");
+    expect(normalizeWssOrigin("wss://example.org:8443")).toBe("wss://example.org:8443");
+    for (const invalid of [
+      "wss://example.org/path", "wss://example.org/path/", "wss://example.org?query=1",
+      "wss://example.org#fragment", "wss://user@example.org", "wss://example.org:0443",
+      "wss://example.org.", "wss://[::ffff:192.0.2.1]", "ws://example.org",
+    ]) expect(normalizeWssOrigin(invalid), invalid).toBeNull();
   });
 
   it("retains safe server error details and status", async () => {

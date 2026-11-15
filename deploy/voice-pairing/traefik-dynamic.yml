@@ -1,0 +1,9 @@
+# File-provider fragment: path is inside the Traefik container, not Bridge.
+# Install only after verifying the current Traefik version/provider and mount.
+http:
+  serversTransports:
+    homedash-voice-backend:
+      serverName: homedash-bridge.internal
+      rootCAs:
+        - /safety-dynamic/voice-pairing-backend-ca.crt
+      insecureSkipVerify: false
