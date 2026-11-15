@@ -3,11 +3,7 @@ import { ApiError, normalizeWssOrigin, type AdminApi } from "./api";
 import type { VoicePairingState, VoicePairingStatus } from "./types";
 import { useT } from "./i18n";
 import { SectionHeading } from "./ui";
-
-type QRDetection = { rawValue: string };
-type QRDetector = { detect: (source: HTMLVideoElement) => Promise<QRDetection[]> };
-type QRDetectorConstructor = new (options: { formats: string[] }) => QRDetector;
-type CameraWindow = Window & { BarcodeDetector?: QRDetectorConstructor };
+import { createQrReader } from "./qr-reader";
 
 export type { VoicePairingStatus } from "./types";
 
@@ -90,9 +86,8 @@ export function VoicePairingPanel(props: PanelProps) {
   }
 
   async function startCameraScan() {
-    const BarcodeDetector = (window as CameraWindow).BarcodeDetector;
     const mediaDevices = navigator.mediaDevices;
-    if (!BarcodeDetector || !mediaDevices?.getUserMedia) {
+    if (!mediaDevices?.getUserMedia) {
       setCameraState("unsupported");
       return;
     }
@@ -115,21 +110,26 @@ export function VoicePairingPanel(props: PanelProps) {
       video.srcObject = stream;
       await video.play();
       if (token !== scanToken.current) return;
-      const detector = new BarcodeDetector({ formats: ["qr_code"] });
+      const readQr = createQrReader();
       setCameraState("scanning");
+      let lastScan = -Infinity;
 
-      const scanFrame = async () => {
+      const scanFrame = async (now = performance.now()) => {
         if (token !== scanToken.current || !videoRef.current) return;
+        if (now - lastScan < 150) {
+          animationRef.current = requestAnimationFrame((time) => { void scanFrame(time); });
+          return;
+        }
+        lastScan = now;
         try {
-          const detections = await detector.detect(videoRef.current);
+          const payload = await readQr(videoRef.current);
           if (token !== scanToken.current) return;
-          const payload = detections.find((result) => result.rawValue)?.rawValue;
           if (payload) {
             setPairingDraft({ deviceId: props.deviceId, value: payload });
             stopCamera();
             return;
           }
-          animationRef.current = requestAnimationFrame(() => { void scanFrame(); });
+          animationRef.current = requestAnimationFrame((time) => { void scanFrame(time); });
         } catch {
           if (token === scanToken.current) {
             stopCamera();
@@ -204,7 +204,7 @@ export function VoicePairingPanel(props: PanelProps) {
           {(cameraState === "starting" || cameraState === "scanning") && <button className="button secondary" type="button" onClick={stopCamera}>{t("Остановить камеру")}</button>}
           {cameraState === "unsupported" && <p role="status">{t("Сканирование камерой недоступно в этом браузере. Введите код вручную.")}</p>}
           {cameraState === "error" && <p role="alert">{t("Не удалось запустить камеру или прочитать QR-код. Введите код вручную.")}</p>}
-          {(cameraState === "starting" || cameraState === "scanning") && <video ref={videoRef} muted playsInline aria-label={t("Предпросмотр камеры для QR-кода")} style={{ display: "block", width: "100%", maxHeight: 280, objectFit: "cover" }} />}
+          <video ref={videoRef} muted playsInline hidden={cameraState !== "starting" && cameraState !== "scanning"} aria-label={t("Предпросмотр камеры для QR-кода")} style={{ width: "100%", maxHeight: 280, objectFit: "cover" }} />
         </div>
         <div className="button-row">
           <button className="button" type="submit" disabled={!pairingPayload.trim() || !validWssOrigin(props.wssOrigin) || props.busy}>
